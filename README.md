@@ -1,6 +1,6 @@
-# Synapse Flow (Web App)
+# AntiForget (Web App)
 
-Synapse Flow is a web app for active learning with three core workflows:
+AntiForget is a web app for active learning with three core workflows:
 
 - Upload & Summarize: upload source files and create concise summaries
 - Topic Map: connect topics visually
