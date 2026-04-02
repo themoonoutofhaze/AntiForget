@@ -7,7 +7,7 @@ import { KeyRound, Moon, Save, Sun, Palette, CheckCircle2, HardDrive, Cloud, Clo
 import type { IconType } from 'react-icons';
 import * as SiIcons from 'react-icons/si';
 import { getStorage, updateStorage, type AiProvider } from '../../utils/storage';
-import { apiGet } from '../../utils/api/client';
+import { apiDelete, apiGet } from '../../utils/api/client';
 import { addUserModel, deleteUserModel, getApiCredentialStatus, getUserModels, saveApiCredential, saveModelPrioritySettings, testApiConnectivity, type ModelProvider, type PrioritizedModelCandidate } from '../../utils/gemini';
 import { isPuterAvailable, puterChat } from '../../utils/puter';
 
@@ -158,6 +158,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
     });
     const [driveConnected, setDriveConnected] = useState(false);
     const [driveReady, setDriveReady] = useState(false);
+    const [isDisconnectingDrive, setIsDisconnectingDrive] = useState(false);
     const [savedKeyProviders, setSavedKeyProviders] = useState<Record<AiProvider, boolean>>({
         openai: false,
         groq: false,
@@ -532,6 +533,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
     const handleConnectGoogleDrive = async () => {
         const response = await apiGet<{ authUrl: string }>('/drive/auth-url');
         window.location.href = response.authUrl;
+    };
+
+    const handleDisconnectGoogleDrive = async () => {
+        setIsDisconnectingDrive(true);
+        try {
+            await apiDelete<{ ok: boolean; disconnected: boolean }>('/settings/storage-provider/google-drive');
+            setDriveConnected(false);
+        } catch (error) {
+            alert(error instanceof Error ? error.message : 'Failed to disconnect Google Drive.');
+        } finally {
+            setIsDisconnectingDrive(false);
+        }
     };
 
     const handleTestProvider = async (provider: AiProvider) => {
@@ -1157,6 +1170,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                     <Cloud className="w-4 h-4" />
                                     {driveConnected ? 'Reconnect Drive' : 'Connect Drive'}
                                 </button>
+                                {driveConnected && (
+                                    <button
+                                        type="button"
+                                        className="btn-secondary gap-2"
+                                        onClick={handleDisconnectGoogleDrive}
+                                        disabled={isDisconnectingDrive}
+                                    >
+                                        {isDisconnectingDrive ? 'Disconnecting...' : 'Disconnect Drive'}
+                                    </button>
+                                )}
                             </div>
                         </div>
                     )}

@@ -1982,6 +1982,46 @@ app.put('/api/app/settings/storage-provider', async (req, res) => {
   }
 });
 
+app.delete('/api/app/settings/storage-provider/google-drive', async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+
+    await ensureUser(userId);
+    const db = await getDb();
+    const existing = await db.get(
+      `SELECT access_token, refresh_token FROM drive_connections WHERE user_id = ?`,
+      [userId]
+    );
+
+    if (!existing) {
+      return res.json({ ok: true, disconnected: false });
+    }
+
+    const oauthClient = getOAuthClient();
+    const accessToken = decryptDriveToken(existing.access_token);
+    const refreshToken = decryptDriveToken(existing.refresh_token);
+
+    // Revoke tokens if possible, then clear local linkage regardless.
+    const tokensToRevoke = [accessToken, refreshToken].filter((token) => typeof token === 'string' && token.trim());
+    for (const token of tokensToRevoke) {
+      try {
+        await oauthClient.revokeToken(token);
+      } catch (revokeError) {
+        console.warn('Failed to revoke Google Drive token during disconnect', revokeError);
+      }
+    }
+
+    await db.run(`DELETE FROM drive_connections WHERE user_id = ?`, [userId]);
+    return res.json({ ok: true, disconnected: true });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Failed to disconnect Google Drive.' });
+  }
+});
+
 app.get('/api/app/drive/auth-url', async (req, res) => {
   try {
     const userId = getUserId(req);
