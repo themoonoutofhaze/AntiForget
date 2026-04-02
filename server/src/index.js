@@ -10,6 +10,10 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import { google } from 'googleapis';
+import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
+import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
+import { OAuth2Client as GoogleOAuthClient } from 'google-auth-library';
 
 import { config, hasGoogleDriveConfig } from './config.js';
 import { decryptText, encryptText } from './crypto.js';
@@ -23,11 +27,32 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
 const execFileAsync = promisify(execFile);
 
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors({ origin: config.frontendBaseUrl, credentials: true }));
 app.use(express.json({ limit: '2mb' }));
+
+const authRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many attempts. Please try again later.' },
+});
+
+const tutorRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please slow down.' },
+});
 
 const PROVIDERS = new Set(['openai', 'groq', 'mistral', 'nvidia', 'openrouter', 'gemini', 'claude', 'puter']);
 const FILE_PROVIDERS = new Set(['local', 'google-drive']);
+const AUTH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
+const AUTH_ISSUER = 'antiforget-app';
+const JWT_SECRET = /^[0-9a-fA-F]{64}$/.test(config.encryptionKey)
+  ? Buffer.from(config.encryptionKey, 'hex')
+  : crypto.createHash('sha256').update(config.encryptionKey).digest();
 
 const normalizeProvider = (value) => {
   if (typeof value !== 'string') {
@@ -273,11 +298,62 @@ const toSafeBrowsePath = (maybePath) => {
 };
 
 const getUserId = (req) => {
-  const userId = req.query.userId || req.body.userId || req.header('x-user-id');
-  if (!userId || typeof userId !== 'string') {
+  if (req.authUserId && typeof req.authUserId === 'string') {
+    return req.authUserId;
+  }
+  return null;
+};
+
+const normalizeAuthEmail = (email) => (typeof email === 'string' ? email.trim().toLowerCase() : '');
+
+const timingSafeEqualHex = (a, b) => {
+  if (typeof a !== 'string' || typeof b !== 'string') {
+    return false;
+  }
+
+  const left = Buffer.from(a, 'hex');
+  const right = Buffer.from(b, 'hex');
+  if (left.length === 0 || left.length !== right.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(left, right);
+};
+
+const hashPasswordWithSalt = (password, saltHex) => {
+  return crypto.pbkdf2Sync(password, Buffer.from(saltHex, 'hex'), 120000, 32, 'sha256').toString('hex');
+};
+
+const createAuthToken = (payload) => {
+  return jwt.sign(
+    { sub: payload.userId, email: payload.email },
+    JWT_SECRET,
+    { expiresIn: AUTH_TOKEN_TTL_SECONDS, issuer: AUTH_ISSUER }
+  );
+};
+
+const verifyAuthToken = (token) => {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET, { issuer: AUTH_ISSUER });
+    if (typeof decoded.sub !== 'string') return null;
+    return { userId: decoded.sub, email: typeof decoded.email === 'string' ? decoded.email : '' };
+  } catch {
     return null;
   }
-  return userId;
+};
+
+const readBearerToken = (req) => {
+  const value = req.header('authorization');
+  if (!value || typeof value !== 'string') {
+    return null;
+  }
+
+  const [type, token] = value.trim().split(/\s+/, 2);
+  if (!type || !token || type.toLowerCase() !== 'bearer') {
+    return null;
+  }
+
+  return token;
 };
 
 const getStorageBundle = async (userId) => {
@@ -415,8 +491,8 @@ const replaceTopics = async (db, userId, nodes) => {
       [
         node.id,
         userId,
-        node.title || '',
-        node.summary || '',
+        (node.title || '').slice(0, 500),
+        (node.summary || '').slice(0, 50000),
         tagsJson,
         node.hasPdfBlob ? 1 : 0,
         positionX,
@@ -717,6 +793,14 @@ You are a Socratic Tutor evaluating user answers to revision questions.
 - STOP GENERATING IMMEDIATELY. Do NOT add any pleasantries, wrap-up text, or conversational filler. Output ONLY the grades and concise correct answers.
 `;
 
+const chatSystemPrompt = `
+You are a Socratic Tutor helping a student after they completed a revision quiz.
+- Answer follow-up questions clearly and directly.
+- Keep explanations concise, practical, and adapted to student level when possible.
+- Use examples or analogies when they improve understanding.
+- If asked for extra practice, give one focused question at a time unless the user asks for more.
+`;
+
 const parseStructuredQuestions = (text) => {
   const cleanText = String(text || '').replace(/\*/g, '');
   const regex = /(?:^|\n)\s*(?:Q)?([1-3])\s*(?:\([^)]*\))?\s*[:.)-]\s*([\s\S]*?)(?=(?:\n\s*(?:Q)?[1-3]\s*(?:\([^)]*\))?\s*[:.)-])|$)/gi;
@@ -733,6 +817,353 @@ const parseStructuredQuestions = (text) => {
 
 app.get('/api/app/health', (_req, res) => {
   res.json({ ok: true });
+});
+
+app.post('/api/app/auth/signup', authRateLimiter, async (req, res) => {
+  try {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const email = normalizeAuthEmail(req.body?.email);
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+
+    if (!name) {
+      return res.status(400).json({ error: 'Name is required.' });
+    }
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'Enter a valid email address.' });
+    }
+    if (password.trim().length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    }
+
+    const db = await getDb();
+    const existing = await db.get(`SELECT id FROM users WHERE lower(email) = ?`, [email]);
+    if (existing?.id) {
+      return res.status(409).json({ error: 'An account with this email already exists. Please sign in.' });
+    }
+
+    const userId = crypto.randomUUID();
+    const saltHex = crypto.randomBytes(16).toString('hex');
+    const passwordHash = hashPasswordWithSalt(password, saltHex);
+
+    await db.exec('BEGIN');
+    await db.run(
+      `INSERT INTO users(id, name, email, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
+      [userId, name, email]
+    );
+    await db.run(
+      `INSERT INTO user_auth_credentials(user_id, password_salt, password_hash, updated_at)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
+      [userId, saltHex, passwordHash]
+    );
+    await ensureUser(userId);
+    await db.exec('COMMIT');
+
+    const token = createAuthToken({ userId, email });
+    return res.status(201).json({ user: { id: userId, name, email }, token });
+  } catch (error) {
+    try {
+      const db = await getDb();
+      await db.exec('ROLLBACK');
+    } catch {
+      // no-op
+    }
+    console.error(error);
+    return res.status(500).json({ error: 'Failed to create account.' });
+  }
+});
+
+app.post('/api/app/auth/signin', authRateLimiter, async (req, res) => {
+  try {
+    const email = normalizeAuthEmail(req.body?.email);
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'Enter a valid email address.' });
+    }
+    if (!password.trim()) {
+      return res.status(400).json({ error: 'Password is required.' });
+    }
+
+    const db = await getDb();
+    const row = await db.get(
+      `SELECT u.id, u.name, u.email, c.password_salt, c.password_hash
+       FROM users u
+       INNER JOIN user_auth_credentials c ON c.user_id = u.id
+       WHERE lower(u.email) = ?`,
+      [email]
+    );
+
+    if (!row?.id || !row.password_salt || !row.password_hash) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    const expectedHash = hashPasswordWithSalt(password, row.password_salt);
+    if (!timingSafeEqualHex(expectedHash, row.password_hash)) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    const token = createAuthToken({ userId: row.id, email: row.email });
+    return res.json({ user: { id: row.id, name: row.name || 'Learner', email: row.email }, token });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Failed to sign in.' });
+  }
+});
+
+app.post('/api/app/auth/google', authRateLimiter, async (req, res) => {
+  try {
+    const { credential } = req.body || {};
+    if (!credential || typeof credential !== 'string') {
+      return res.status(400).json({ error: 'credential is required.' });
+    }
+
+    const googleClientId = process.env.VITE_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || '';
+    if (!googleClientId) {
+      return res.status(400).json({ error: 'Google Sign-In is not configured on the server.' });
+    }
+
+    const client = new GoogleOAuthClient(googleClientId);
+    const ticket = await client.verifyIdToken({ idToken: credential, audience: googleClientId });
+    const payload = ticket.getPayload();
+    if (!payload || !payload.sub || !payload.email) {
+      return res.status(401).json({ error: 'Invalid Google credential.' });
+    }
+
+    const db = await getDb();
+    await db.run(
+      `INSERT INTO users(id, name, email, updated_at)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, updated_at = CURRENT_TIMESTAMP`,
+      [payload.sub, payload.name || 'Learner', payload.email]
+    );
+    await ensureUser(payload.sub);
+
+    const user = await db.get(`SELECT id, name, email FROM users WHERE id = ?`, [payload.sub]);
+    const token = createAuthToken({ userId: payload.sub, email: payload.email });
+    return res.json({
+      user: { id: payload.sub, name: user?.name || 'Learner', email: payload.email, avatarUrl: payload.picture },
+      token,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(401).json({ error: 'Google Sign-In verification failed.' });
+  }
+});
+
+app.post('/api/app/auth/passkey/challenge', authRateLimiter, async (req, res) => {
+  try {
+    const { type, userId: requestedUserId, userName } = req.body || {};
+    if (type !== 'registration' && type !== 'authentication') {
+      return res.status(400).json({ error: 'type must be "registration" or "authentication"' });
+    }
+
+    const db = await getDb();
+    await db.run(`DELETE FROM passkey_challenges WHERE expires_at < ?`, [Date.now()]);
+
+    const rpID = new URL(config.frontendBaseUrl).hostname;
+    const expiresAt = Date.now() + 5 * 60 * 1000;
+
+    if (type === 'registration') {
+      if (!requestedUserId || !userName) {
+        return res.status(400).json({ error: 'userId and userName are required for registration' });
+      }
+
+      const existingCredentials = await db.all(
+        `SELECT credential_id FROM passkey_credentials WHERE user_id = ?`,
+        [requestedUserId]
+      );
+
+      const options = await generateRegistrationOptions({
+        rpName: 'AntiForget',
+        rpID,
+        userID: new TextEncoder().encode(requestedUserId),
+        userName: requestedUserId,
+        userDisplayName: userName,
+        attestationType: 'none',
+        excludeCredentials: existingCredentials.map((c) => ({ id: c.credential_id, type: 'public-key' })),
+        authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' },
+      });
+
+      const challengeId = crypto.randomUUID();
+      await db.run(
+        `INSERT INTO passkey_challenges(id, challenge, user_id, expires_at) VALUES (?, ?, ?, ?)`,
+        [challengeId, options.challenge, requestedUserId, expiresAt]
+      );
+      return res.json({ challengeId, options });
+    }
+
+    const allCredentials = requestedUserId
+      ? await db.all(`SELECT credential_id FROM passkey_credentials WHERE user_id = ?`, [requestedUserId])
+      : await db.all(`SELECT credential_id FROM passkey_credentials`);
+
+    const options = await generateAuthenticationOptions({
+      rpID,
+      userVerification: 'preferred',
+      allowCredentials: allCredentials.map((c) => ({ id: c.credential_id, type: 'public-key' })),
+    });
+
+    const challengeId = crypto.randomUUID();
+    await db.run(
+      `INSERT INTO passkey_challenges(id, challenge, user_id, expires_at) VALUES (?, ?, ?, ?)`,
+      [challengeId, options.challenge, requestedUserId || null, expiresAt]
+    );
+    return res.json({ challengeId, options });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Failed to generate passkey challenge' });
+  }
+});
+
+app.post('/api/app/auth/passkey/register', authRateLimiter, async (req, res) => {
+  try {
+    const { challengeId, response, userId, name } = req.body || {};
+    if (!challengeId || !response || !userId || !name) {
+      return res.status(400).json({ error: 'challengeId, response, userId, and name are required' });
+    }
+
+    const db = await getDb();
+    const challengeRow = await db.get(
+      `SELECT challenge FROM passkey_challenges WHERE id = ? AND user_id = ? AND expires_at > ?`,
+      [challengeId, userId, Date.now()]
+    );
+    if (!challengeRow) {
+      return res.status(400).json({ error: 'Challenge not found or expired.' });
+    }
+
+    const rpID = new URL(config.frontendBaseUrl).hostname;
+    const verification = await verifyRegistrationResponse({
+      response,
+      expectedChallenge: challengeRow.challenge,
+      expectedOrigin: config.frontendBaseUrl,
+      expectedRPID: rpID,
+    });
+
+    if (!verification.verified || !verification.registrationInfo) {
+      return res.status(400).json({ error: 'Passkey registration verification failed.' });
+    }
+
+    const { credential } = verification.registrationInfo;
+    await db.run(`DELETE FROM passkey_challenges WHERE id = ?`, [challengeId]);
+
+    await db.run(
+      `INSERT INTO users(id, name, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(id) DO UPDATE SET name = COALESCE(excluded.name, users.name), updated_at = CURRENT_TIMESTAMP`,
+      [userId, name]
+    );
+    await ensureUser(userId);
+
+    const credId = crypto.randomUUID();
+    await db.run(
+      `INSERT INTO passkey_credentials(id, user_id, credential_id, public_key, counter, updated_at)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(credential_id) DO UPDATE SET counter = excluded.counter, updated_at = CURRENT_TIMESTAMP`,
+      [credId, userId, credential.id, Buffer.from(credential.publicKey).toString('base64'), credential.counter]
+    );
+
+    const user = await db.get(`SELECT id, name, email FROM users WHERE id = ?`, [userId]);
+    const token = createAuthToken({ userId, email: user?.email || '' });
+    return res.status(201).json({
+      user: { id: userId, name: user?.name || name, email: user?.email || `${userId}@passkey.local` },
+      token,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Passkey registration failed.' });
+  }
+});
+
+app.post('/api/app/auth/passkey/authenticate', authRateLimiter, async (req, res) => {
+  try {
+    const { challengeId, response } = req.body || {};
+    if (!challengeId || !response) {
+      return res.status(400).json({ error: 'challengeId and response are required' });
+    }
+
+    const db = await getDb();
+    const challengeRow = await db.get(
+      `SELECT challenge FROM passkey_challenges WHERE id = ? AND expires_at > ?`,
+      [challengeId, Date.now()]
+    );
+    if (!challengeRow) {
+      return res.status(400).json({ error: 'Challenge not found or expired.' });
+    }
+
+    const credentialId = response.id;
+    const credRow = await db.get(
+      `SELECT id, user_id, public_key, counter FROM passkey_credentials WHERE credential_id = ?`,
+      [credentialId]
+    );
+    if (!credRow) {
+      return res.status(401).json({ error: 'Passkey not found.' });
+    }
+
+    const rpID = new URL(config.frontendBaseUrl).hostname;
+    const verification = await verifyAuthenticationResponse({
+      response,
+      expectedChallenge: challengeRow.challenge,
+      expectedOrigin: config.frontendBaseUrl,
+      expectedRPID: rpID,
+      credential: {
+        id: credentialId,
+        publicKey: new Uint8Array(Buffer.from(credRow.public_key, 'base64')),
+        counter: credRow.counter,
+      },
+    });
+
+    if (!verification.verified) {
+      return res.status(401).json({ error: 'Passkey authentication failed.' });
+    }
+
+    await db.run(
+      `UPDATE passkey_credentials SET counter = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [verification.authenticationInfo.newCounter, credRow.id]
+    );
+    await db.run(`DELETE FROM passkey_challenges WHERE id = ?`, [challengeId]);
+
+    const user = await db.get(`SELECT id, name, email FROM users WHERE id = ?`, [credRow.user_id]);
+    if (!user) return res.status(401).json({ error: 'User not found.' });
+
+    const token = createAuthToken({ userId: user.id, email: user.email || '' });
+    return res.json({
+      user: { id: user.id, name: user.name || 'Learner', email: user.email || `${user.id}@passkey.local` },
+      token,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Passkey authentication failed.' });
+  }
+});
+
+const PUBLIC_API_PATHS = new Set([
+  '/health',
+  '/auth/signup',
+  '/auth/signin',
+  '/auth/google',
+  '/auth/passkey/challenge',
+  '/auth/passkey/register',
+  '/auth/passkey/authenticate',
+  '/drive/callback',
+]);
+
+app.use('/api/app', (req, _res, next) => {
+  const token = readBearerToken(req);
+  if (token) {
+    const claims = verifyAuthToken(token);
+    if (claims?.userId) {
+      req.authUserId = claims.userId;
+    }
+  }
+  return next();
+});
+
+app.use('/api/app', (req, res, next) => {
+  if (PUBLIC_API_PATHS.has(req.path)) {
+    return next();
+  }
+  if (!req.authUserId) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+  return next();
 });
 
 app.get('/api/app/storage', async (req, res) => {
@@ -908,10 +1339,11 @@ app.get('/api/app/ai/credentials/status', async (req, res) => {
 
 app.post('/api/app/ai/credentials', async (req, res) => {
   try {
-    const { userId, provider: rawProvider, apiKey } = req.body || {};
+    const userId = getUserId(req);
+    const { provider: rawProvider, apiKey } = req.body || {};
     const provider = normalizeProvider(rawProvider);
-    if (!userId || typeof userId !== 'string') {
-      return res.status(400).json({ error: 'userId is required' });
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required.' });
     }
     if (!PROVIDERS.has(provider)) {
       return res.status(400).json({ error: 'Invalid provider' });
@@ -930,10 +1362,11 @@ app.post('/api/app/ai/credentials', async (req, res) => {
 
 app.post('/api/app/ai/test', async (req, res) => {
   try {
-    const { userId, provider: rawProvider, modelOverride, apiKey } = req.body || {};
+    const userId = getUserId(req);
+    const { provider: rawProvider, modelOverride, apiKey } = req.body || {};
     const provider = normalizeProvider(rawProvider);
-    if (!userId || typeof userId !== 'string') {
-      return res.status(400).json({ error: 'userId is required' });
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required.' });
     }
     if (!PROVIDERS.has(provider)) {
       return res.status(400).json({ error: 'Invalid provider' });
@@ -1062,9 +1495,10 @@ app.get('/api/app/ai/models', async (req, res) => {
 
 app.post('/api/app/ai/models', async (req, res) => {
   try {
-    const { userId, provider, model, reasoning } = req.body || {};
-    if (!userId || typeof userId !== 'string') {
-      return res.status(400).json({ error: 'userId is required' });
+    const userId = getUserId(req);
+    const { provider, model, reasoning } = req.body || {};
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required.' });
     }
 
     await ensureUser(userId);
@@ -1111,9 +1545,10 @@ app.delete('/api/app/ai/models/:modelId', async (req, res) => {
 
 app.put('/api/app/ai/model-priority', async (req, res) => {
   try {
-    const { userId, modelPriority } = req.body || {};
-    if (!userId || typeof userId !== 'string') {
-      return res.status(400).json({ error: 'userId is required' });
+    const userId = getUserId(req);
+    const { modelPriority } = req.body || {};
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required.' });
     }
     if (!Array.isArray(modelPriority)) {
       return res.status(400).json({ error: 'modelPriority must be an array' });
@@ -1267,9 +1702,10 @@ app.post('/api/app/settings/local-folder/native-picker', async (req, res) => {
 
 app.put('/api/app/settings/local-folder', async (req, res) => {
   try {
-    const { userId, localStoragePath } = req.body || {};
-    if (!userId || typeof userId !== 'string') {
-      return res.status(400).json({ error: 'userId is required' });
+    const userId = getUserId(req);
+    const { localStoragePath } = req.body || {};
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required.' });
     }
     if (!localStoragePath || typeof localStoragePath !== 'string') {
       return res.status(400).json({ error: 'localStoragePath is required' });
@@ -1278,8 +1714,12 @@ app.put('/api/app/settings/local-folder', async (req, res) => {
     await ensureUser(userId);
 
     const resolvedPath = path.isAbsolute(localStoragePath)
-      ? localStoragePath
+      ? path.resolve(localStoragePath)
       : path.resolve(process.cwd(), localStoragePath);
+
+    if (!isPathWithinRoot(resolvedPath)) {
+      return res.status(400).json({ error: 'Storage path must be within your home directory.' });
+    }
 
     fs.mkdirSync(resolvedPath, { recursive: true });
 
@@ -1295,10 +1735,11 @@ app.put('/api/app/settings/local-folder', async (req, res) => {
 
 app.put('/api/app/settings/storage-provider', async (req, res) => {
   try {
-    const { userId, provider: rawProvider } = req.body || {};
+    const userId = getUserId(req);
+    const { provider: rawProvider } = req.body || {};
     const provider = normalizeProvider(rawProvider);
-    if (!userId || typeof userId !== 'string') {
-      return res.status(400).json({ error: 'userId is required' });
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required.' });
     }
     if (!FILE_PROVIDERS.has(provider)) {
       return res.status(400).json({ error: 'Invalid provider' });
@@ -1366,7 +1807,10 @@ app.get('/api/app/drive/callback', async (req, res) => {
 
     const decodedState = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
     const userId = decodedState.userId;
-    const returnUrl = decodedState.returnUrl || config.frontendBaseUrl;
+    const rawReturnUrl = typeof decodedState.returnUrl === 'string' ? decodedState.returnUrl : '';
+    const returnUrl = rawReturnUrl.startsWith(config.frontendBaseUrl)
+      ? rawReturnUrl
+      : config.frontendBaseUrl;
 
     if (!userId || typeof userId !== 'string') {
       return res.status(400).send('Invalid state payload');
@@ -1383,6 +1827,10 @@ app.get('/api/app/drive/callback', async (req, res) => {
     }
 
     const db = await getDb();
+    const encryptedAccessToken = JSON.stringify(encryptText(tokens.access_token));
+    const encryptedRefreshToken = tokens.refresh_token
+      ? JSON.stringify(encryptText(tokens.refresh_token))
+      : null;
     await db.run(
       `INSERT INTO drive_connections(user_id, access_token, refresh_token, scope, expiry_date, updated_at)
        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -1394,8 +1842,8 @@ app.get('/api/app/drive/callback', async (req, res) => {
                      updated_at = CURRENT_TIMESTAMP`,
       [
         userId,
-        tokens.access_token,
-        tokens.refresh_token || null,
+        encryptedAccessToken,
+        encryptedRefreshToken,
         tokens.scope || null,
         tokens.expiry_date || null,
       ]
@@ -1407,6 +1855,19 @@ app.get('/api/app/drive/callback', async (req, res) => {
     return res.status(500).send('Google Drive connect failed');
   }
 });
+
+const decryptDriveToken = (raw) => {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.ciphertext && parsed.iv && parsed.tag) {
+      return decryptText(parsed);
+    }
+  } catch {
+    // Fall through for legacy plaintext tokens
+  }
+  return raw;
+};
 
 const getDriveClientForUser = async (userId) => {
   const db = await getDb();
@@ -1420,8 +1881,8 @@ const getDriveClientForUser = async (userId) => {
 
   const oauthClient = getOAuthClient();
   oauthClient.setCredentials({
-    access_token: row.access_token,
-    refresh_token: row.refresh_token,
+    access_token: decryptDriveToken(row.access_token),
+    refresh_token: decryptDriveToken(row.refresh_token),
     scope: row.scope,
     expiry_date: row.expiry_date,
   });
@@ -1431,6 +1892,13 @@ const getDriveClientForUser = async (userId) => {
       return;
     }
 
+    const newEncryptedAccess = tokens.access_token
+      ? JSON.stringify(encryptText(tokens.access_token))
+      : null;
+    const newEncryptedRefresh = tokens.refresh_token
+      ? JSON.stringify(encryptText(tokens.refresh_token))
+      : null;
+
     await db.run(
       `UPDATE drive_connections
           SET access_token = COALESCE(?, access_token),
@@ -1439,7 +1907,7 @@ const getDriveClientForUser = async (userId) => {
               expiry_date = COALESCE(?, expiry_date),
               updated_at = CURRENT_TIMESTAMP
         WHERE user_id = ?`,
-      [tokens.access_token || null, tokens.refresh_token || null, tokens.scope || null, tokens.expiry_date || null, userId]
+      [newEncryptedAccess, newEncryptedRefresh, tokens.scope || null, tokens.expiry_date || null, userId]
     );
   });
 
@@ -1448,7 +1916,7 @@ const getDriveClientForUser = async (userId) => {
 
 app.post('/api/app/files/upload', upload.single('file'), async (req, res) => {
   try {
-    const userId = req.body.userId;
+    const userId = getUserId(req);
     const topicId = req.body.topicId;
     const file = req.file;
 
@@ -1548,11 +2016,12 @@ app.delete('/api/app/files/:topicId', async (req, res) => {
   }
 });
 
-app.post('/api/app/ai/tutor', async (req, res) => {
+app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
   try {
-    const { userId, history, newPrompt, topicContext } = req.body || {};
-    if (!userId || typeof userId !== 'string') {
-      return res.status(400).json({ error: 'userId is required' });
+    const userId = getUserId(req);
+    const { history, newPrompt, topicContext, mode } = req.body || {};
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required.' });
     }
 
     await ensureUser(userId);
@@ -1565,8 +2034,12 @@ app.post('/api/app/ai/tutor', async (req, res) => {
     }
 
     const isFirstTurn = !history || history.length === 0;
+    const resolvedMode = mode === 'questions' || mode === 'grading' || mode === 'chat'
+      ? mode
+      : (isFirstTurn ? 'questions' : 'grading');
+    const shouldInjectTopicContext = resolvedMode === 'questions' && isFirstTurn;
     let finalPrompt = newPrompt;
-    if (isFirstTurn) {
+    if (shouldInjectTopicContext) {
       const topicName = typeof topicContext?.topicName === 'string' && topicContext.topicName.trim()
         ? topicContext.topicName.trim()
         : 'Unknown topic';
@@ -1611,7 +2084,14 @@ app.post('/api/app/ai/tutor', async (req, res) => {
     }
 
     const messages = [
-      { role: 'system', content: isFirstTurn ? generationSystemPrompt : gradingSystemPrompt },
+      {
+        role: 'system',
+        content: resolvedMode === 'questions'
+          ? generationSystemPrompt
+          : resolvedMode === 'grading'
+            ? gradingSystemPrompt
+            : chatSystemPrompt,
+      },
       ...((history || []).slice(-6)).map((entry) => ({
         role: entry.role === 'model' ? 'assistant' : 'user',
         content: (entry.parts || []).map((part) => part.text).join('\n'),
@@ -1676,16 +2156,16 @@ app.post('/api/app/ai/tutor', async (req, res) => {
         provider: candidate.provider,
         model: candidate.model,
         messages,
-        temperature: isFirstTurn ? 0.2 : 0,
+        temperature: resolvedMode === 'questions' ? 0.2 : resolvedMode === 'chat' ? 0.3 : 0,
         maxTokens: tokenLimit,
         reasoning: Boolean(candidate.reasoning),
-        isFirstTurn,
+        isFirstTurn: resolvedMode === 'questions',
       });
 
       const requestController = new AbortController();
       const requestTimeoutMs = candidate.provider === 'nvidia'
-        ? (isFirstTurn ? 30000 : 45000)
-        : (isFirstTurn ? 30000 : 14000);
+        ? (resolvedMode === 'questions' ? 30000 : 45000)
+        : (resolvedMode === 'questions' ? 30000 : 14000);
       const timeoutId = setTimeout(() => requestController.abort(), requestTimeoutMs);
 
       let aiRes;
@@ -1715,9 +2195,8 @@ app.post('/api/app/ai/tutor', async (req, res) => {
         const generatedText = extractProviderText(candidate.provider, data);
 
         // Validate text contains the required formats
-        const isFirstTurn = !history || history.length === 0;
         let isValid = true;
-        if (isFirstTurn) {
+        if (resolvedMode === 'questions') {
           const parsedQuestions = parseStructuredQuestions(generatedText);
           if (parsedQuestions.length === 0) {
             currentAttempt.status = 422;
@@ -1730,7 +2209,7 @@ app.post('/api/app/ai/tutor', async (req, res) => {
             isValid = false;
             console.log(`[Model Selection] ⚠️  ${candidate.id}: Only ${parsedQuestions.length}/3 questions parsed, marking invalid`);
           }
-        } else {
+        } else if (resolvedMode === 'grading') {
           if (!/Score\s*:/i.test(generatedText)) isValid = false;
         }
 

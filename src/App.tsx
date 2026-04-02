@@ -10,8 +10,13 @@ import { RevisionPoolStatus } from './components/features/RevisionPoolStatus';
 import { InfoGuide } from './components/features/InfoGuide.tsx';
 import { getStorage } from './utils/storage';
 import { LoginScreen } from './components/auth/LoginScreen';
-import { clearStoredUser, getStoredUser, storeUser } from './utils/auth';
-import type { AuthUser } from './utils/auth';
+import {
+    clearStoredUser,
+    getAuthToken,
+    getStoredUser,
+    storeUser,
+    type AuthUser,
+} from './utils/auth';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -181,8 +186,17 @@ function App() {
         });
     }, [currentView]);
 
-    const handleLogin = (nextUser: AuthUser) => {
-        storeUser(nextUser);
+    const handleLogin = (nextUser: AuthUser, options?: { keepToken?: boolean }) => {
+        const shouldKeepToken = options?.keepToken === true;
+
+        if (shouldKeepToken) {
+            const token = getAuthToken();
+            storeUser(nextUser, token || undefined);
+        } else {
+            clearStoredUser();
+            storeUser(nextUser);
+        }
+
         setUser(nextUser);
     };
 

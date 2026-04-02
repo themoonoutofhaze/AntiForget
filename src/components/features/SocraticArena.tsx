@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Target, KeyRound, CheckCircle2, ChevronRight, BookOpen, Star, Smile, AlertCircle, Loader2 } from 'lucide-react';
+import { Send, Target, KeyRound, CheckCircle2, ChevronRight, BookOpen, Star, Smile, AlertCircle, Loader2, MessageCircle } from 'lucide-react';
 import { Timer } from '../ui/Timer';
 import { RichTextMessage } from '../ui/RichTextMessage';
 import { addRevisionSeconds, getTodaysReviews, processReview } from '../../utils/fsrs';
@@ -22,6 +22,11 @@ interface QuizResult {
     userAnswer: string;
 }
 
+interface ChatMessage {
+    role: 'user' | 'model';
+    text: string;
+}
+
 /* ──────────────────────────────────────────────────────────────
    Helpers
 ────────────────────────────────────────────────────────────── */
@@ -38,7 +43,7 @@ const parseQuestions = (text: string): QuizQuestion[] => {
     const regex = /Q([1-3])\s*(?:\([^)]*\))?\s*:\s*([\s\S]*?)(?=Q[1-3]\s*(?:\([^)]*\))?\s*:|$)/gi;
     for (const match of cleanText.matchAll(regex)) {
         const idx = Number(match[1]);
-        let raw = (match[2] || '').trim();
+        const raw = (match[2] || '').trim();
 
         if (idx >= 1 && idx <= 3 && raw) {
             results.push({ index: idx, label: Q_LABEL_MAP[idx] || `Q${idx}`, text: raw });
@@ -113,6 +118,11 @@ export const SocraticArena: React.FC = () => {
     const [activeModelInfo, setActiveModelInfo] = useState<{ provider: ModelProvider; model: string } | null>(null);
     const [questionGenerationMs, setQuestionGenerationMs] = useState<number | null>(null);
     const [errorWithAttempts, setErrorWithAttempts] = useState<{ message: string; attempts: AiAttempt[] } | null>(null);
+    const [chatOpen, setChatOpen] = useState(false);
+    const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+    const [chatInput, setChatInput] = useState('');
+    const [isChatSending, setIsChatSending] = useState(false);
+    const [chatError, setChatError] = useState<string | null>(null);
 
     const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
     const [timeBudgetReached, setTimeBudgetReached] = useState(false);
@@ -165,6 +175,69 @@ export const SocraticArena: React.FC = () => {
     const getElapsedSeconds = () => {
         if (!sessionStartedAt) return 0;
         return Math.max(0, Math.round((Date.now() - sessionStartedAt) / 1000));
+    };
+
+    const buildRevisionChatContext = () => {
+        const quizLines = results.map((r) => {
+            const q = questions.find((item) => item.index === r.index);
+            return [
+                `Q${r.index} (${q?.label || 'QUESTION'}): ${q?.text || ''}`,
+                `Student answer: ${r.userAnswer || 'No answer provided.'}`,
+                `Model answer: ${r.correctAnswer || 'No model answer provided.'}`,
+                `Score: ${r.score}/4`,
+            ].join('\n');
+        });
+
+        return [
+            `Current topic: ${currentTopicName || 'Unknown topic'}`,
+            averageScore !== null ? `Average quiz score: ${averageScore.toFixed(2)}/4` : '',
+            quizLines.length > 0 ? `Quiz recap:\n${quizLines.join('\n\n')}` : '',
+        ].filter(Boolean).join('\n\n');
+    };
+
+    const sendChatMessage = async () => {
+        const trimmed = chatInput.trim();
+        if (!trimmed || isChatSending) return;
+
+        setChatInput('');
+        setChatError(null);
+        setIsChatSending(true);
+
+        const nextUserMessage: ChatMessage = { role: 'user', text: trimmed };
+        const historyMessages = [...chatMessages, nextUserMessage];
+        setChatMessages(historyMessages);
+
+        const history = historyMessages.slice(0, -1).map((m) => ({
+            role: m.role,
+            parts: [{ text: m.text }],
+        }));
+
+        const prompt = chatMessages.length === 0
+            ? `${buildRevisionChatContext()}\n\nStudent follow-up question: ${trimmed}`
+            : trimmed;
+
+        const controller = new AbortController();
+        activeRequestRef.current?.abort();
+        activeRequestRef.current = controller;
+
+        try {
+            const topicContext = currentNodeId ? await buildTopicContext(currentNodeId) : null;
+            const resp = await generateTutorResponse(history, prompt, topicContext, {
+                signal: controller.signal,
+                mode: 'chat',
+            });
+            if (resp.provider && resp.model) {
+                setActiveModelInfo({ provider: resp.provider, model: resp.model });
+            }
+            setChatMessages((prev) => [...prev, { role: 'model', text: resp.text }]);
+        } catch (e: any) {
+            if (e instanceof Error && e.name === 'AbortError') return;
+            console.error(e);
+            setChatError(e.message || 'Failed to send message. Please try again.');
+        } finally {
+            if (activeRequestRef.current === controller) activeRequestRef.current = null;
+            setIsChatSending(false);
+        }
     };
 
     const buildTopicContext = async (topicId: string): Promise<TutorTopicContext> => {
@@ -241,6 +314,11 @@ export const SocraticArena: React.FC = () => {
         setActiveModelInfo(null);
         setQuestionGenerationMs(null);
         setErrorWithAttempts(null);
+        setChatOpen(false);
+        setChatMessages([]);
+        setChatInput('');
+        setIsChatSending(false);
+        setChatError(null);
         activeRequestRef.current?.abort();
 
         const topicContext = await buildTopicContext(nextId);
@@ -282,9 +360,14 @@ export const SocraticArena: React.FC = () => {
         setPhase('submitting');
         setIsTimerActive(false);
         activeRequestRef.current?.abort();
+        setChatOpen(false);
+        setChatMessages([]);
+        setChatInput('');
+        setIsChatSending(false);
+        setChatError(null);
 
         // Build a single combined answer message for the AI
-        let combinedAnswer = questions
+        const combinedAnswer = questions
             .map((q, i) => `Q${q.index}: ${answers[i] || 'I don\'t know'}`)
             .join('\n\n');
 
@@ -371,6 +454,11 @@ export const SocraticArena: React.FC = () => {
         setQuestionGenerationMs(null);
         setErrorWithAttempts(null);
         setIsUnrecorded(false);
+        setChatOpen(false);
+        setChatMessages([]);
+        setChatInput('');
+        setIsChatSending(false);
+        setChatError(null);
     };
 
     /* ══════════════════════════════════════════════════════════
@@ -780,6 +868,91 @@ export const SocraticArena: React.FC = () => {
                             </div>
                         );
                     })}
+                </div>
+
+                <div className="glass-card max-w-2xl mx-auto p-5 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div>
+                            <h3 className="section-title text-lg">Need help with these answers?</h3>
+                            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                                Use the button below to ask AI follow-up questions about this revision topic.
+                            </p>
+                        </div>
+                        <button
+                            id="toggle-results-chat-btn"
+                            onClick={() => setChatOpen((prev) => !prev)}
+                            className="btn-secondary gap-2"
+                        >
+                            <MessageCircle className="w-4 h-4" />
+                            {chatOpen ? 'Hide AI Chat' : 'I Want to Ask AI Questions'}
+                        </button>
+                    </div>
+
+                    {chatOpen && (
+                        <div className="space-y-3">
+                            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                                {chatMessages.length === 0 && (
+                                    <div className="text-sm rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)' }}>
+                                        Ask anything about your mistakes, model answers, or request extra practice questions.
+                                    </div>
+                                )}
+                                {chatMessages.map((message, idx) => (
+                                    <div
+                                        key={`${message.role}-${idx}`}
+                                        className="rounded-xl p-3"
+                                        style={{
+                                            background: message.role === 'user' ? 'rgba(16,185,129,0.12)' : 'rgba(255,255,255,0.03)',
+                                            border: '1px solid var(--border-default)',
+                                        }}
+                                    >
+                                        <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>
+                                            {message.role === 'user' ? 'You' : 'AI Tutor'}
+                                        </p>
+                                        {message.role === 'model' ? (
+                                            <RichTextMessage text={message.text} />
+                                        ) : (
+                                            <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>{message.text}</p>
+                                        )}
+                                    </div>
+                                ))}
+                                {isChatSending && (
+                                    <div className="rounded-xl p-3 text-sm" style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)' }}>
+                                        Thinking…
+                                    </div>
+                                )}
+                            </div>
+
+                            {chatError && (
+                                <p className="text-xs" style={{ color: '#ef4444' }}>{chatError}</p>
+                            )}
+
+                            <div className="flex flex-col sm:flex-row gap-2">
+                                <input
+                                    id="results-chat-input"
+                                    value={chatInput}
+                                    onChange={(e) => setChatInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            sendChatMessage();
+                                        }
+                                    }}
+                                    disabled={isChatSending}
+                                    className="input-field flex-1"
+                                    placeholder="Ask AI to explain, compare, or give one more practice question..."
+                                />
+                                <button
+                                    id="send-results-chat-btn"
+                                    onClick={sendChatMessage}
+                                    disabled={!chatInput.trim() || isChatSending}
+                                    className="btn-primary gap-2"
+                                >
+                                    <Send className="w-4 h-4" />
+                                    Send
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Navigation */}

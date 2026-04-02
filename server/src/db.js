@@ -98,6 +98,15 @@ export const getDb = async () => {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS user_auth_credentials (
+        user_id TEXT PRIMARY KEY,
+        password_salt TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+
       CREATE TABLE IF NOT EXISTS user_model_priorities (
         user_id TEXT NOT NULL,
         model_id TEXT NOT NULL,
@@ -149,6 +158,25 @@ export const getDb = async () => {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS passkey_challenges (
+        id TEXT PRIMARY KEY,
+        challenge TEXT NOT NULL,
+        user_id TEXT,
+        expires_at INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS passkey_credentials (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        credential_id TEXT NOT NULL UNIQUE,
+        public_key TEXT NOT NULL,
+        counter INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       );
 
       CREATE INDEX IF NOT EXISTS idx_topics_user ON topics(user_id);

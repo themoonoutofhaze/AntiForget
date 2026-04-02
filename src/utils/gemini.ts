@@ -67,18 +67,6 @@ export const getEnvModelForProvider = (provider: AiProvider): string => getProvi
 
 export const getEnvProvider = (): AiProvider => getDefaultProviderFromEnv();
 
-export const getEnvApiKeyForProvider = (provider: AiProvider): string => {
-    const envKeys: Record<AiProvider, string | undefined> = {
-        openai: import.meta.env.VITE_OPENAI_API_KEY,
-        groq: import.meta.env.VITE_GROQ_API_KEY,
-        mistral: import.meta.env.VITE_MISTRAL_API_KEY,
-        nvidia: import.meta.env.VITE_NVIDIA_API_KEY,
-        openrouter: import.meta.env.VITE_OPENROUTER_API_KEY,
-        gemini: import.meta.env.VITE_GEMINI_API_KEY,
-        claude: import.meta.env.VITE_CLAUDE_API_KEY,
-    };
-    return envKeys[provider]?.trim() || '';
-};
 
 export interface TutorTopicContext {
     topicId: string;
@@ -115,6 +103,8 @@ export interface UserModelPayload extends Record<string, unknown> {
     reasoning: boolean;
 }
 
+export type TutorRequestMode = 'questions' | 'grading' | 'chat';
+
 const generationSystemPrompt = [
     'You are a Socratic Tutor for revision topics. First assistant turn for a topic:',
     '- Generate exactly 3 open-ended questions in one message.',
@@ -131,15 +121,25 @@ const gradingSystemPrompt = [
     '- Use exact format: Qn Score: x and Qn Correct Answer: y',
 ].join('\n');
 
+const chatSystemPrompt = [
+    'You are a Socratic Tutor helping a student after they completed a revision quiz.',
+    '- Answer the student\'s follow-up questions clearly and directly.',
+    '- Use short explanations, examples, and analogies when helpful.',
+    '- If the student asks for practice, provide one focused question at a time unless they ask for more.',
+    '- Stay grounded in the provided topic and quiz context when available.',
+].join('\n');
+
 const buildTutorPrompt = (
     history: { role: 'user' | 'model', parts: { text: string }[] }[],
     newPrompt: string,
     topicContext: TutorTopicContext | null,
+    mode: TutorRequestMode,
 ) => {
     const isFirstTurn = !history || history.length === 0;
     let finalPrompt = newPrompt;
+    const shouldInjectTopicContext = mode === 'questions' && isFirstTurn;
 
-    if (isFirstTurn) {
+    if (shouldInjectTopicContext) {
         const topicName = typeof topicContext?.topicName === 'string' && topicContext.topicName.trim()
             ? topicContext.topicName.trim()
             : 'Unknown topic';
@@ -183,7 +183,11 @@ const buildTutorPrompt = (
         ].join('\n');
     }
 
-    const systemPrompt = isFirstTurn ? generationSystemPrompt : gradingSystemPrompt;
+    const systemPrompt = mode === 'questions'
+        ? generationSystemPrompt
+        : mode === 'grading'
+            ? gradingSystemPrompt
+            : chatSystemPrompt;
     const serializedHistory = (history || [])
         .slice(-6)
         .map((entry) => {
@@ -213,13 +217,15 @@ export const generateTutorResponse = async (
     history: { role: 'user' | 'model', parts: { text: string }[] }[],
     newPrompt: string,
     topicContext: TutorTopicContext | null,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; mode?: TutorRequestMode }
 ) => {
+    const resolvedMode: TutorRequestMode = options?.mode || ((!history || history.length === 0) ? 'questions' : 'grading');
+
     try {
         const puterPrimary = await getPuterPrimaryModel();
         if (puterPrimary && isPuterAvailable()) {
             const startedAt = Date.now();
-            const prompt = buildTutorPrompt(history, newPrompt, topicContext);
+            const prompt = buildTutorPrompt(history, newPrompt, topicContext, resolvedMode);
             const text = await puterChat(prompt, { model: puterPrimary.model });
             return {
                 text: text || 'No response generated.',
@@ -244,6 +250,7 @@ export const generateTutorResponse = async (
         history,
         newPrompt,
         topicContext,
+        mode: resolvedMode,
     }, {
         signal: options?.signal,
     });

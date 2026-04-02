@@ -148,16 +148,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             href="https://github.com/sponsors/themoonoutofhaze?frequency=one-time"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="group w-full px-0 py-1 rounded-full flex items-center justify-center gap-1.5 text-[10px] font-semibold border transition-colors duration-300"
+                            className="group w-full px-0 py-1 rounded-full flex items-center justify-center gap-1.5 text-[10px] font-semibold border bg-[var(--bg-muted)] transition-all duration-300 hover:scale-110 hover:shadow-lg hover:bg-[rgba(239,68,68,0.14)]"
                             style={{
                                 color: 'rgba(220, 38, 38, 0.72)',
-                                background: 'var(--bg-muted)',
                                 borderColor: 'var(--border-default)',
                             }}
                             title="Support me"
                         >
-                            <span className="inline-flex items-center justify-center rounded-full p-[2px]" style={{ background: 'rgba(239, 68, 68, 0.14)' }}>
-                                <Heart className="w-3 h-3 fill-current" style={{ color: 'rgba(220, 38, 38, 0.94)' }} />
+                            <span className="inline-flex items-center justify-center rounded-full p-[2px] transition-transform duration-300 group-hover:scale-110" style={{ background: 'rgba(239, 68, 68, 0.14)' }}>
+                                <Heart className="w-3 h-3 fill-current transition-all duration-300 group-hover:animate-pulse" style={{ color: 'rgba(220, 38, 38, 0.94)' }} />
                             </span>
                         </a>
                     ) : (
@@ -177,18 +176,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 </a>
                             </div>
                             <a
-                                href="https://buymeacoffee.com/mehdinickzamir"
+                                href="https://ko-fi.com/mehdinickzamir"
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="group shrink-0 px-2 py-1 rounded-full inline-flex items-center justify-center gap-1 text-[10px] font-semibold border transition-colors duration-300"
+                                className="group shrink-0 px-2 py-1 rounded-full inline-flex items-center justify-center gap-1 text-[10px] font-semibold border bg-[var(--bg-muted)] transition-all duration-300 hover:scale-105 hover:shadow-md hover:bg-[rgba(239,68,68,0.14)]"
                                 style={{
                                     color: 'rgba(220, 38, 38, 0.72)',
-                                    background: 'var(--bg-muted)',
                                     borderColor: 'var(--border-default)',
                                 }}
                             >
-                                <span className="inline-flex items-center justify-center rounded-full p-[2px]" style={{ background: 'rgba(239, 68, 68, 0.14)' }}>
-                                    <Heart className="w-3 h-3 fill-current" style={{ color: 'rgba(220, 38, 38, 0.94)' }} />
+                                <span className="inline-flex items-center justify-center rounded-full p-[2px] transition-transform duration-300 group-hover:scale-110" style={{ background: 'rgba(239, 68, 68, 0.14)' }}>
+                                    <Heart className="w-3 h-3 fill-current transition-all duration-300 group-hover:animate-pulse" style={{ color: 'rgba(220, 38, 38, 0.94)' }} />
                                 </span>
                                 <span>Support</span>
                             </a>

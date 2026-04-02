@@ -1,4 +1,10 @@
 import { getCurrentUserId } from './userContext';
+import { getAuthToken } from './auth';
+
+const getAuthHeaders = (): HeadersInit => {
+    const token = getAuthToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+};
 
 export const savePdfBlob = async (id: string, originalName: string, blob: Blob) => {
     const formData = new FormData();
@@ -9,6 +15,7 @@ export const savePdfBlob = async (id: string, originalName: string, blob: Blob) 
 
     const res = await fetch('/api/app/files/upload', {
         method: 'POST',
+        headers: getAuthHeaders(),
         body: formData,
     });
 
@@ -26,6 +33,7 @@ export const deletePdfBlob = async (id: string) => {
     const userId = encodeURIComponent(getCurrentUserId());
     const res = await fetch(`/api/app/files/${encodeURIComponent(id)}?userId=${userId}`, {
         method: 'DELETE',
+        headers: getAuthHeaders(),
     });
 
     if (!res.ok) {

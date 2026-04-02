@@ -1,4 +1,5 @@
 import { getCurrentUserId } from '../userContext';
+import { getAuthToken } from '../auth';
 
 const API_BASE = '/api/app';
 
@@ -21,7 +22,16 @@ const parseError = (status: number, text: string) => {
 };
 
 const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
-  const res = await fetch(buildApiUrl(path), init);
+  const headers = new Headers(init?.headers);
+  const token = getAuthToken();
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const res = await fetch(buildApiUrl(path), {
+    ...init,
+    headers,
+  });
 
   if (!res.ok) {
     const text = await res.text();

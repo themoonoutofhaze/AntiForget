@@ -12,12 +12,19 @@ const resolveAppPath = (value, fallback) => {
   return path.resolve(projectRootDir, picked);
 };
 
+if (!process.env.APP_ENCRYPTION_KEY || !process.env.APP_ENCRYPTION_KEY.trim()) {
+  throw new Error(
+    'APP_ENCRYPTION_KEY environment variable is required but not set. ' +
+    'Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+  );
+}
+
 export const config = {
   port: Number(process.env.PORT || process.env.APP_SERVER_PORT || 8787),
   dbPath: resolveAppPath(process.env.APP_DB_PATH, './server_data/smartrevision.db'),
   uploadsRoot: resolveAppPath(process.env.LOCAL_FILE_STORAGE_PATH, './server_data/uploads'),
   frontendBaseUrl: process.env.FRONTEND_BASE_URL || 'http://localhost:5173',
-  encryptionKey: process.env.APP_ENCRYPTION_KEY || '',
+  encryptionKey: process.env.APP_ENCRYPTION_KEY.trim(),
   google: {
     clientId: process.env.GOOGLE_DRIVE_CLIENT_ID || '',
     clientSecret: process.env.GOOGLE_DRIVE_CLIENT_SECRET || '',

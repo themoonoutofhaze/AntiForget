@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, ExternalLink, KeyRound, Sparkles } from 'lucide-react';
+import { ChevronDown, ExternalLink, Github, Heart, KeyRound, Mail, Sparkles } from 'lucide-react';
 
 const overviewStepCardStyle: React.CSSProperties = {
     background: 'var(--bg-surface-raised)',
@@ -90,9 +90,9 @@ const appOverviewSteps = [
 ];
 
 export const InfoGuide: React.FC = () => {
-    const [openSection, setOpenSection] = useState<'overview' | 'keys' | null>(null);
+    const [openSection, setOpenSection] = useState<'overview' | 'keys' | 'opensource' | null>(null);
 
-    const toggleSection = (section: 'overview' | 'keys') => {
+    const toggleSection = (section: 'overview' | 'keys' | 'opensource') => {
         setOpenSection((current) => (current === section ? null : section));
     };
 
@@ -235,6 +235,105 @@ export const InfoGuide: React.FC = () => {
                                         </div>
                                     </div>
                                 ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section className={sectionBaseClass} style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}>
+                <button
+                    type="button"
+                    onClick={() => toggleSection('opensource')}
+                    className="w-full px-4 py-4 flex items-center gap-3 text-left"
+                    aria-expanded={openSection === 'opensource'}
+                >
+                    <span
+                        className="w-7 h-7 rounded-full text-xs font-semibold flex items-center justify-center"
+                        style={{ background: '#ec4899', color: '#fff' }}
+                    >
+                        3
+                    </span>
+                    <Heart className="w-4 h-4" style={{ color: '#ec4899' }} />
+                    <h3 className="text-sm font-semibold flex-1" style={{ color: 'var(--text-primary)' }}>Open Source Project</h3>
+                    <ChevronDown
+                        className={`w-4 h-4 transition-transform ${openSection === 'opensource' ? 'rotate-180' : ''}`}
+                        style={{ color: 'var(--text-secondary)' }}
+                    />
+                </button>
+                <div
+                    className={`grid transition-all duration-300 ${openSection === 'opensource' ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
+                >
+                    <div className="overflow-hidden">
+                        <div className="px-4 pb-4 border-t space-y-4" style={{ borderColor: 'var(--border-default)' }}>
+                            <div className="pt-3">
+                                <p className="text-xs leading-5" style={{ color: 'var(--text-secondary)' }}>
+                                    AntiForget is open-source because I believe in making learning tools accessible to everyone. This app has helped me study more effectively, and I want other students to benefit from it too — completely free. If you're a developer, you're welcome to contribute and make it even better.
+                                </p>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div style={providerCardStyle} className="space-y-2">
+                                    <div className="flex items-center gap-2">
+                                        <Github className="w-4 h-4" style={{ color: 'var(--text-primary)' }} />
+                                        <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+                                            GitHub Repository
+                                        </p>
+                                    </div>
+                                    <p className="text-xs leading-5" style={{ color: 'var(--text-secondary)' }}>
+                                        Contribute, report issues, or fork the project.
+                                    </p>
+                                    <a
+                                        href="https://github.com/themoonoutofhaze/AntiForget"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-xs font-medium hover:underline"
+                                        style={{ color: 'var(--accent-primary)' }}
+                                    >
+                                        View on GitHub
+                                        <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                </div>
+                                <div style={providerCardStyle} className="space-y-2">
+                                    <div className="flex items-center gap-2">
+                                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" style={{ color: 'var(--text-primary)' }}>
+                                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.07 5 7.41 0 2.12-.82 4.05-2.1 5.39z"/>
+                                        </svg>
+                                        <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+                                            MIT License
+                                        </p>
+                                    </div>
+                                    <p className="text-xs leading-5" style={{ color: 'var(--text-secondary)' }}>
+                                        Free to use, modify, and distribute.
+                                    </p>
+                                    <a
+                                        href="/open-source-license.txt"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-xs font-medium hover:underline"
+                                        style={{ color: 'var(--accent-primary)' }}
+                                    >
+                                        View License
+                                        <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                </div>
+                                <div style={providerCardStyle} className="space-y-2">
+                                    <div className="flex items-center gap-2">
+                                        <Mail className="w-4 h-4" style={{ color: 'var(--text-primary)' }} />
+                                        <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+                                            Contact
+                                        </p>
+                                    </div>
+                                    <p className="text-xs leading-5" style={{ color: 'var(--text-secondary)' }}>
+                                        Questions, feedback, or suggestions? Reach out.
+                                    </p>
+                                    <a
+                                        href="mailto:mehdi.nickzamir99@gmail.com"
+                                        className="inline-flex items-center gap-1 text-xs font-medium hover:underline"
+                                        style={{ color: 'var(--accent-primary)' }}
+                                    >
+                                        mehdi.nickzamir99@gmail.com
+                                    </a>
+                                </div>
                             </div>
                         </div>
                     </div>

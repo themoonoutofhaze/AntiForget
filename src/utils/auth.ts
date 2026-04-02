@@ -1,7 +1,8 @@
-import { jwtDecode } from 'jwt-decode';
+import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
 
 const AUTH_KEY = 'synapse_auth_user';
 const PASSKEY_ACCOUNT_KEY = 'synapse_passkey_account';
+const AUTH_TOKEN_KEY = 'synapse_auth_token';
 
 export interface AuthUser {
     id: string;
@@ -10,50 +11,63 @@ export interface AuthUser {
     avatarUrl?: string;
 }
 
-interface GoogleCredentialPayload {
-    sub: string;
-    name: string;
-    email: string;
-    picture?: string;
-}
-
 interface PasskeyAccount {
     credentialIdBase64Url: string;
     user: AuthUser;
 }
 
-const toBase64Url = (bytes: Uint8Array): string => {
-    const binary = String.fromCharCode(...bytes);
-    const base64 = btoa(binary);
-    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-};
+interface EmailAuthResponse {
+    user: AuthUser;
+    token: string;
+}
 
-const fromBase64Url = (value: string): ArrayBuffer => {
-    const padded = value + '='.repeat((4 - (value.length % 4)) % 4);
-    const base64 = padded.replace(/-/g, '+').replace(/_/g, '/');
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
+const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
-    for (let i = 0; i < binary.length; i += 1) {
-        bytes[i] = binary.charCodeAt(i);
-    }
-
-    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-};
-
-const randomChallenge = () => crypto.getRandomValues(new Uint8Array(32));
-
-const getStoredPasskeyAccount = (): PasskeyAccount | null => {
+const getStoredPasskeyAccounts = (): PasskeyAccount[] => {
     const raw = localStorage.getItem(PASSKEY_ACCOUNT_KEY);
     if (!raw) {
-        return null;
+        return [];
     }
 
     try {
-        return JSON.parse(raw) as PasskeyAccount;
+        const parsed = JSON.parse(raw) as PasskeyAccount[] | PasskeyAccount;
+        if (Array.isArray(parsed)) {
+            return parsed;
+        }
+        return parsed ? [parsed] : [];
     } catch {
-        return null;
+        return [];
     }
+};
+
+const parseEmailAuthError = async (res: Response): Promise<string> => {
+    const fallback = `Request failed: ${res.status}`;
+    try {
+        const parsed = (await res.json()) as { error?: string };
+        if (parsed?.error && typeof parsed.error === 'string') {
+            return parsed.error;
+        }
+        return fallback;
+    } catch {
+        return fallback;
+    }
+};
+
+const postEmailAuth = async (
+    path: '/api/app/auth/signup' | '/api/app/auth/signin',
+    payload: Record<string, string>,
+): Promise<EmailAuthResponse> => {
+    const res = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+        throw new Error(await parseEmailAuthError(res));
+    }
+
+    return (await res.json()) as EmailAuthResponse;
 };
 
 export const getStoredUser = (): AuthUser | null => {
@@ -69,76 +83,92 @@ export const getStoredUser = (): AuthUser | null => {
     }
 };
 
-export const storeUser = (user: AuthUser) => {
+export const storeUser = (user: AuthUser, token?: string) => {
     localStorage.setItem(AUTH_KEY, JSON.stringify(user));
+    if (token) {
+        localStorage.setItem(AUTH_TOKEN_KEY, token);
+    }
+};
+
+export const getAuthToken = (): string | null => {
+    const raw = localStorage.getItem(AUTH_TOKEN_KEY);
+    return raw && raw.trim() ? raw : null;
+};
+
+export const storeAuthToken = (token: string) => {
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
 };
 
 export const clearStoredUser = () => {
     localStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem(AUTH_TOKEN_KEY);
 };
 
-export const parseGoogleCredential = (credential: string): AuthUser => {
-    const payload = jwtDecode<GoogleCredentialPayload>(credential);
-
-    return {
-        id: payload.sub,
-        name: payload.name,
-        email: payload.email,
-        avatarUrl: payload.picture,
-    };
+export const verifyGoogleCredentialWithServer = async (credential: string): Promise<{ user: AuthUser; token: string }> => {
+    const res = await fetch('/api/app/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential }),
+    });
+    if (!res.ok) {
+        const parsed = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(parsed?.error || 'Google Sign-In verification failed.');
+    }
+    return res.json() as Promise<{ user: AuthUser; token: string }>;
 };
 
 export const isPasskeySupported = () => {
     return typeof window !== 'undefined' && 'PublicKeyCredential' in window;
 };
 
-export const registerPasskeyUser = async (name: string, email: string): Promise<AuthUser> => {
+export const getRegisteredPasskeyUsers = (): AuthUser[] => {
+    return getStoredPasskeyAccounts().map((account) => account.user);
+};
+
+export const registerPasskeyUser = async (name: string): Promise<AuthUser> => {
     if (!isPasskeySupported()) {
         throw new Error('Passkeys are not supported on this browser.');
     }
 
     const userId = crypto.randomUUID();
-    const publicKey: PublicKeyCredentialCreationOptions = {
-        challenge: randomChallenge(),
-        rp: {
-            name: 'AntiForget',
-            id: window.location.hostname,
-        },
-        user: {
-            id: new TextEncoder().encode(userId),
-            name: email,
-            displayName: name,
-        },
-        pubKeyCredParams: [
-            { type: 'public-key', alg: -7 },
-            { type: 'public-key', alg: -257 },
-        ],
-        timeout: 60_000,
-        attestation: 'none',
-        authenticatorSelection: {
-            residentKey: 'preferred',
-            userVerification: 'preferred',
-        },
-    };
 
-    const credential = await navigator.credentials.create({ publicKey });
-    if (!(credential instanceof PublicKeyCredential)) {
-        throw new Error('Passkey registration was cancelled.');
+    const challengeRes = await fetch('/api/app/auth/passkey/challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'registration', userId, userName: name }),
+    });
+    if (!challengeRes.ok) {
+        throw new Error('Failed to get passkey challenge from server.');
     }
+    const { challengeId, options } = await challengeRes.json() as { challengeId: string; options: object };
 
-    const authUser: AuthUser = {
-        id: userId,
-        name,
-        email,
-    };
+    const registrationResponse = await startRegistration({ optionsJSON: options as Parameters<typeof startRegistration>[0]['optionsJSON'] });
+
+    const registerRes = await fetch('/api/app/auth/passkey/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ challengeId, response: registrationResponse, userId, name }),
+    });
+    if (!registerRes.ok) {
+        const parsed = await registerRes.json().catch(() => ({})) as { error?: string };
+        throw new Error(parsed?.error || 'Passkey registration failed.');
+    }
+    const { user, token } = await registerRes.json() as { user: AuthUser; token: string };
+
+    storeAuthToken(token);
 
     const account: PasskeyAccount = {
-        credentialIdBase64Url: toBase64Url(new Uint8Array(credential.rawId)),
-        user: authUser,
+        credentialIdBase64Url: registrationResponse.id,
+        user,
     };
+    const existingAccounts = getStoredPasskeyAccounts();
+    const nextAccounts = [
+        ...existingAccounts.filter((a) => a.credentialIdBase64Url !== account.credentialIdBase64Url),
+        account,
+    ];
+    localStorage.setItem(PASSKEY_ACCOUNT_KEY, JSON.stringify(nextAccounts));
 
-    localStorage.setItem(PASSKEY_ACCOUNT_KEY, JSON.stringify(account));
-    return authUser;
+    return user;
 };
 
 export const authenticateWithPasskey = async (): Promise<AuthUser> => {
@@ -146,27 +176,74 @@ export const authenticateWithPasskey = async (): Promise<AuthUser> => {
         throw new Error('Passkeys are not supported on this browser.');
     }
 
-    const account = getStoredPasskeyAccount();
-    if (!account) {
-        throw new Error('No passkey account found. Register one first.');
+    const challengeRes = await fetch('/api/app/auth/passkey/challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'authentication' }),
+    });
+    if (!challengeRes.ok) {
+        throw new Error('Failed to get passkey challenge from server.');
+    }
+    const { challengeId, options } = await challengeRes.json() as { challengeId: string; options: object };
+
+    const authenticationResponse = await startAuthentication({ optionsJSON: options as Parameters<typeof startAuthentication>[0]['optionsJSON'] });
+
+    const verifyRes = await fetch('/api/app/auth/passkey/authenticate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ challengeId, response: authenticationResponse }),
+    });
+    if (!verifyRes.ok) {
+        const parsed = await verifyRes.json().catch(() => ({})) as { error?: string };
+        throw new Error(parsed?.error || 'Passkey authentication failed.');
+    }
+    const { user, token } = await verifyRes.json() as { user: AuthUser; token: string };
+
+    storeAuthToken(token);
+    return user;
+};
+
+export const registerWithEmailPassword = async (name: string, email: string, password: string): Promise<AuthUser> => {
+    const normalizedName = name.trim();
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedPassword = password.trim();
+
+    if (!normalizedName) {
+        throw new Error('Name is required.');
+    }
+    if (!normalizedEmail || !normalizedEmail.includes('@')) {
+        throw new Error('Enter a valid email address.');
+    }
+    if (normalizedPassword.length < 8) {
+        throw new Error('Password must be at least 8 characters.');
     }
 
-    const publicKey: PublicKeyCredentialRequestOptions = {
-        challenge: randomChallenge(),
-        timeout: 60_000,
-        userVerification: 'preferred',
-        allowCredentials: [
-            {
-                type: 'public-key',
-                id: fromBase64Url(account.credentialIdBase64Url),
-            },
-        ],
-    };
+    const response = await postEmailAuth('/api/app/auth/signup', {
+        name: normalizedName,
+        email: normalizedEmail,
+        password: normalizedPassword,
+    });
 
-    const credential = await navigator.credentials.get({ publicKey });
-    if (!(credential instanceof PublicKeyCredential)) {
-        throw new Error('Passkey sign-in was cancelled.');
+    storeAuthToken(response.token);
+    return response.user;
+};
+
+export const signInWithEmailPassword = async (email: string, password: string): Promise<AuthUser> => {
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedPassword = password.trim();
+
+    if (!normalizedEmail || !normalizedEmail.includes('@')) {
+        throw new Error('Enter a valid email address.');
+    }
+    if (!normalizedPassword) {
+        throw new Error('Password is required.');
     }
 
-    return account.user;
+    const response = await postEmailAuth('/api/app/auth/signin', {
+        email: normalizedEmail,
+        password: normalizedPassword,
+    });
+
+    storeAuthToken(response.token);
+    return response.user;
 };
