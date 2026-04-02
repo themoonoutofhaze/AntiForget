@@ -182,9 +182,9 @@ function SetupChecklistCard({
                             <p className="text-xs font-black tracking-[0.08em] text-teal-900/60 dark:text-teal-200/60" style={{ margin: 0 }}>STEP 2</p>
                             {driveStepDone ? <CheckCircle2 className="w-5 h-5 text-emerald-500 dark:text-emerald-400" /> : <Cloud className="w-5 h-5 text-teal-600 dark:text-teal-400" />}
                         </div>
-                        <p className="text-sm font-bold text-teal-900 dark:text-white" style={{ margin: '8px 0 4px' }}>Connect Google Drive</p>
+                        <p className="text-sm font-bold text-teal-900 dark:text-white" style={{ margin: '8px 0 4px' }}>Connect Google Drive(Optional)</p>
                         <p className="text-xs leading-relaxed text-teal-800/80 dark:text-teal-100/80" style={{ margin: 0 }}>
-                            {setup.driveReady ? 'Required to upload and distill PDFs.' : 'Drive integration is currently offline.'}
+                            {setup.driveReady ? 'Only required to upload summary files' : 'Drive integration is currently offline.'}
                         </p>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
                             <button 
