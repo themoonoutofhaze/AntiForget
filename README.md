@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="icon.svg" width="128" height="128" alt="AntiForget Logo">
+</p>
+
 # AntiForget (Web App) v1.0.0
 
 AntiForget is an expert-level active learning platform designed to help you master complex topics through AI-assisted synthesis and spaced repetition. It transforms your raw documents into structured knowledge maps and interactive recall sessions.
