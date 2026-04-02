@@ -1,103 +1,69 @@
-# AntiForget (Web App)
+# AntiForget (Web App) v1.0.0
 
-AntiForget is a web app for active learning with three core workflows:
+AntiForget is an expert-level active learning platform designed to help you master complex topics through AI-assisted synthesis and spaced repetition. It transforms your raw documents into structured knowledge maps and interactive recall sessions.
 
-- Upload & Summarize: upload source files and create concise summaries
-- Topic Map: connect topics visually
-- Review Coach: run timed AI-assisted recall sessions with spaced repetition
+## Core Features
 
-This version persists user data through a backend API with PostgreSQL tables, and supports file storage in either a local server folder or Google Drive.
+- **Distillation Tray**: Upload and summarize source files (PDF, DOCX, etc.) into concise, actionable summaries.
+- **Knowledge Graph**: A visual map to connect topics, tags, and ideas, helping you see the "big picture" of your learning.
+- **Socratic Arena**: AI-assisted active recall sessions that simulate oral exams or deep questioning to test your understanding.
+- **FSRS Spaced Repetition**: Uses the Free Spaced Repetition Scheduler (FSRS) to optimize your review intervals for maximum retention.
+- **Secure Data Persistence**: Full PostgreSQL backend support with encrypted credential storage and WebAuthn (Passkey) sign-in.
+- **Hybrid Storage**: Flexible file persistence using either local server storage or Google Drive integration.
 
 ## Tech Stack
 
-- React 19 + TypeScript
-- Vite 7
-- Tailwind CSS
-- Express API server
-- PostgreSQL database
-- Google OAuth (via `@react-oauth/google`)
-- Puter.js (frontend AI access)
-- Passkey sign-in (WebAuthn)
-- GLM / Groq / Mistral APIs (for review coaching)
-- Encrypted API key storage (server-side)
-- Local folder / Google Drive file persistence
+- **Frontend**: React 19, TypeScript, Vite 7, Tailwind CSS, Lucide Icons.
+- **Backend**: Express.js (Node.js), PostgreSQL (via `pg`).
+- **AI/LLM**: Support for Mistral, Groq, NVIDIA, and OpenRouter via server-side proxy.
+- **Authentication**: Google OAuth 2.0 and Passkeys (WebAuthn).
+- **Storage**: Local filesystem or Google Drive API.
 
-## Setup
+## Setup Guide
 
-1. Install dependencies:
+### 1. Prerequisite: Database
+Ensure you have a PostgreSQL instance running. You can use a local installation or a cloud provider like Supabase.
 
+### 2. Installation
 ```bash
+# Clone the repository
+git clone https://github.com/themoonoutofhaze/AntiForget.git
+cd AntiForget
+
+# Install dependencies
 npm install
 ```
 
-2. Add environment variables:
-
+### 3. Environment Configuration
+Copy the template and fill in your secrets:
 ```bash
 cp .env.example .env
 ```
+Key required variables:
+- `DATABASE_URL`: Your PostgreSQL connection string.
+- `APP_ENCRYPTION_KEY` & `APP_JWT_SECRET`: Random 64-character hex strings.
+- `VITE_GOOGLE_CLIENT_ID`: Your Google OAuth client ID.
 
-Set Google OAuth + backend settings in `.env`:
-
-```env
-VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
-APP_SERVER_PORT=8787
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/antiforget
-FRONTEND_BASE_URL=http://localhost:5173
-APP_ENCRYPTION_KEY=replace-with-a-long-random-secret
-APP_JWT_SECRET=replace-with-a-different-long-random-secret
-```
-
-If you have existing SQLite data and want to keep it, add:
-
-```env
-SQLITE_PATH=./server_data/smartrevision.db
-```
-
-Then run:
-
+### 4. Database Migration (Optional)
+If you are coming from an older SQLite version, migrate your data:
 ```bash
 npm run db:migrate:sqlite-to-postgres:truncate
 npm run db:validate:sqlite-to-postgres
 ```
 
-Google Drive storage support (required for uploads):
-
-```env
-GOOGLE_DRIVE_CLIENT_ID=...
-GOOGLE_DRIVE_CLIENT_SECRET=...
-GOOGLE_DRIVE_REDIRECT_URI=http://localhost:8787/api/app/drive/callback
-```
-
-3. Start backend API server:
-
+### 5. Start the Application
 ```bash
-npm run dev:server
-```
-
-4. Start frontend dev server:
-
-```bash
+# Run both frontend and backend in development mode
 npm run dev
 ```
+The app will be available at `http://localhost:5173`.
 
-The frontend uses `/api/app/*` and Vite proxies those requests to `http://localhost:8787` in development.
-
-## Google Login Configuration
-
-Create credentials in Google Cloud Console:
-
-1. Create or select a project.
-2. Configure OAuth consent screen.
-3. Create OAuth Client ID of type "Web application".
-4. Add your dev origin (for example `http://localhost:5173`) to Authorized JavaScript origins.
-5. Copy the client ID into `VITE_GOOGLE_CLIENT_ID`.
-
-## Google Drive Storage Configuration
-
-If you enable Google Drive as the file provider:
-
-1. Use the same Google Cloud project (or another one).
-2. Enable Google Drive API.
+## Google Drive Integration
+To enable cloud storage for your uploads:
+1. Enable the **Google Drive API** in your Google Cloud Console.
+2. Create an OAuth 2.0 Client ID (Web Application).
+3. Add `http://localhost:8787/api/app/drive/callback` to your **Authorized redirect URIs**.
+4. Fill in `GOOGLE_DRIVE_CLIENT_ID`, `SECRET`, and `REDIRECT_URI` in your `.env`.
 3. Add `http://localhost:8787/api/app/drive/callback` as an authorized redirect URI.
 4. Set `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, and `GOOGLE_DRIVE_REDIRECT_URI`.
 5. In app Settings, choose Google Drive and click Connect Drive.
