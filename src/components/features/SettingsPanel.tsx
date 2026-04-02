@@ -1266,10 +1266,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                 <div className="flex flex-wrap gap-2">
                                     <button
                                         type="button"
-                                        className={`btn-secondary gap-2 ${driveConnected ? 'bg-red-500/10 hover:bg-red-500/20 text-red-500 border-red-500/20' : ''}`}
+                                        className="btn-secondary gap-2"
                                         onClick={handleConnectGoogleDrive}
                                         disabled={isLoadingDriveStatus || !driveReady}
-                                        style={driveConnected ? { color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.2)' } : {}}
                                     >
                                         {isLoadingDriveStatus ? (
                                             <>
@@ -1289,6 +1288,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                             className="btn-secondary gap-2"
                                             onClick={handleDisconnectGoogleDrive}
                                             disabled={isDisconnectingDrive}
+                                            style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.2)' }}
                                         >
                                             {isDisconnectingDrive ? 'Disconnecting...' : 'Disconnect Drive'}
                                         </button>
