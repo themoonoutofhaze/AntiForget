@@ -30,8 +30,22 @@ const pdfParse = pdfParseModule.default || pdfParseModule;
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: UPLOAD_MAX_FILE_SIZE_BYTES } });
 
+const allowedOrigins = (config.frontendBaseUrl || '')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
 app.use(helmet());
-app.use(cors({ origin: config.frontendBaseUrl, credentials: true }));
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
 app.use(cookieParser());
 app.use(express.json({ limit: '2mb' }));
 
@@ -63,7 +77,7 @@ const setAuthCookie = (res, token) => {
   res.cookie(AUTH_COOKIE_NAME, token, {
     httpOnly: true,
     secure: isProduction,
-    sameSite: isProduction ? 'strict' : 'lax',
+    sameSite: isProduction ? 'lax' : 'lax',
     maxAge: AUTH_TOKEN_TTL_SECONDS * 1000,
     path: '/',
   });
@@ -73,7 +87,7 @@ const clearAuthCookie = (res) => {
   res.clearCookie(AUTH_COOKIE_NAME, {
     httpOnly: true,
     secure: isProduction,
-    sameSite: isProduction ? 'strict' : 'lax',
+    sameSite: isProduction ? 'lax' : 'lax',
     path: '/',
   });
 };
@@ -378,17 +392,17 @@ const getOriginFromUrl = (value) => {
   }
 };
 
-const FRONTEND_ORIGIN = getOriginFromUrl(config.frontendBaseUrl);
+const FRONTEND_ORIGIN = allowedOrigins[0] || null;
 
 const isTrustedRequestOrigin = (req) => {
   const origin = getOriginFromUrl(req.get('origin'));
-  if (origin && FRONTEND_ORIGIN) {
-    return origin === FRONTEND_ORIGIN;
+  if (origin && allowedOrigins.includes(origin)) {
+    return true;
   }
 
   const refererOrigin = getOriginFromUrl(req.get('referer'));
-  if (refererOrigin && FRONTEND_ORIGIN) {
-    return refererOrigin === FRONTEND_ORIGIN;
+  if (refererOrigin && allowedOrigins.includes(refererOrigin)) {
+    return true;
   }
 
   // Non-browser clients may omit Origin/Referer entirely.

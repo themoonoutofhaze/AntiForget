@@ -18,7 +18,7 @@ interface LoginScreenProps {
 }
 
 const FEATURES = [
-    { icon: <BookOpen className="w-3 h-3" />, label: 'Upload summary OF topics' },
+    { icon: <BookOpen className="w-3 h-3" />, label: 'Upload summary of topics' },
     { icon: <Network className="w-3 h-3" />, label: 'Create links between topics' },
     { icon: <Sparkles className="w-3 h-3" />, label: 'Revise smartly using ai & Spaced Repetition' },
 ];  
@@ -519,7 +519,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ hasGoogleClientId, onL
                             <p className="text-[18px] font-bold tracking-tight" style={{ fontFamily: 'Syne, sans-serif', color: '#ffffff', lineHeight: 1.2 }}>
                                 AntiForget
                             </p>
-                            <p className="text-[12px]" style={{ color: 'rgba(255,255,255,0.55)' }}>Intelligent Learning System</p>
+                            <p className="text-[12px]" style={{ color: 'rgba(255,255,255,0.55)' }}>Smart Revision System</p>
                         </div>
                     </div>
 
@@ -528,7 +528,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ hasGoogleClientId, onL
                         className="hidden lg:block"
                         style={{ fontFamily: 'Syne, sans-serif', color: '#ffffff', letterSpacing: '-0.03em', fontSize: '2.2rem', fontWeight: 700, lineHeight: 1.2, marginBottom: '1rem' }}
                     >
-                        Train memory{' '}
+                        Master anything{' '}
                         <span
                             className="inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full"
                             style={{
@@ -543,10 +543,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ hasGoogleClientId, onL
                             FOR FREE
                         </span>
                         <br />
-                        with calm clarity.
+                        with AI precision.
                     </h2>
                     <p className="hidden lg:block text-[15px] leading-relaxed mb-10" style={{ color: 'rgba(255,255,255,0.65)' }}>
-                        One workspace to distill notes, map ideas,<br />and run AI-guided drill sessions.
+                        Import PDFs & notes, map the connections, and crush<br />3-question AI quizzes for deep, active mastery.
                     </p>
 
                     {/* Feature cards */}

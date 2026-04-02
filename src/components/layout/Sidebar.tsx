@@ -112,7 +112,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 AntiForget
                             </p>
                             <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                                Intelligent Learning
+                                Smart revision system
                             </p>
                         </div>
                     )}

@@ -27,3 +27,4 @@ server_data/uploads/
 *.njsproj
 *.sln
 *.sw?
+deploy.sh 
