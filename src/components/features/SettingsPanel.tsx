@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { KeyRound, Moon, Save, Sun, Palette, CheckCircle2, HardDrive, Cloud, Clock3, GraduationCap, Bot, GripVertical, Plus, Trash2, ChevronDown } from 'lucide-react';
+import { KeyRound, Moon, Save, Sun, Palette, CheckCircle2, HardDrive, Cloud, Clock3, GraduationCap, Bot, GripVertical, Plus, Trash2, ChevronDown, Loader2 } from 'lucide-react';
 import type { IconType } from 'react-icons';
 import * as SiIcons from 'react-icons/si';
 import { getStorage, updateStorage, type AiProvider } from '../../utils/storage';
@@ -158,6 +158,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
     });
     const [driveConnected, setDriveConnected] = useState(false);
     const [driveReady, setDriveReady] = useState(false);
+    const [isLoadingDriveStatus, setIsLoadingDriveStatus] = useState(true);
     const [isDisconnectingDrive, setIsDisconnectingDrive] = useState(false);
     const [savedKeyProviders, setSavedKeyProviders] = useState<Record<AiProvider, boolean>>({
         openai: false,
@@ -330,13 +331,20 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                 setPriorityMessage(error instanceof Error ? error.message : 'Failed to load your custom models.');
             }
 
-            const fileSettings = await apiGet<{
-                provider: 'google-drive';
-                driveConnected: boolean;
-                driveReady: boolean;
-            }>('/settings/storage-provider');
-            setDriveConnected(fileSettings.driveConnected);
-            setDriveReady(fileSettings.driveReady);
+            try {
+                const fileSettings = await apiGet<{
+                    provider: 'google-drive';
+                    driveConnected: boolean;
+                    driveReady: boolean;
+                }>('/settings/storage-provider');
+                setDriveConnected(fileSettings.driveConnected);
+                setDriveReady(fileSettings.driveReady);
+            } catch {
+                setDriveConnected(false);
+                setDriveReady(false);
+            } finally {
+                setIsLoadingDriveStatus(false);
+            }
         };
         load();
     }, []);
@@ -1155,7 +1163,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                 style={subsectionPanelStyle}
                             >
                                 <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                                    {!driveReady
+                                    {isLoadingDriveStatus
+                                        ? 'Checking Google Drive connection...'
+                                        : !driveReady
                                         ? 'Google Drive OAuth is not configured on the server yet.'
                                         : driveConnected
                                             ? 'Google Drive is connected for this account.'
@@ -1166,11 +1176,20 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                         type="button"
                                         className={`btn-secondary gap-2 ${driveConnected ? 'bg-red-500/10 hover:bg-red-500/20 text-red-500 border-red-500/20' : ''}`}
                                         onClick={handleConnectGoogleDrive}
-                                        disabled={!driveReady}
+                                        disabled={isLoadingDriveStatus || !driveReady}
                                         style={driveConnected ? { color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.2)' } : {}}
                                     >
-                                        <Cloud className="w-4 h-4" />
-                                        {driveConnected ? 'Reconnect Drive' : 'Connect Drive'}
+                                        {isLoadingDriveStatus ? (
+                                            <>
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                                Checking...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Cloud className="w-4 h-4" />
+                                                {driveConnected ? 'Reconnect Drive' : 'Connect Drive'}
+                                            </>
+                                        )}
                                     </button>
                                     {driveConnected && (
                                         <button
