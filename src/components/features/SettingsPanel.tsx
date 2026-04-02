@@ -1151,7 +1151,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                             </div>
 
                             <div
-                                className="rounded-xl p-3 flex items-center justify-between gap-3"
+                                className="rounded-xl p-3 flex flex-col gap-4"
                                 style={subsectionPanelStyle}
                             >
                                 <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
@@ -1161,25 +1161,28 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                             ? 'Google Drive is connected for this account.'
                                             : 'Connect your Google Drive account to upload files there.'}
                                 </div>
-                                <button
-                                    type="button"
-                                    className="btn-secondary gap-2"
-                                    onClick={handleConnectGoogleDrive}
-                                    disabled={!driveReady}
-                                >
-                                    <Cloud className="w-4 h-4" />
-                                    {driveConnected ? 'Reconnect Drive' : 'Connect Drive'}
-                                </button>
-                                {driveConnected && (
+                                <div className="flex flex-wrap gap-2">
                                     <button
                                         type="button"
-                                        className="btn-secondary gap-2"
-                                        onClick={handleDisconnectGoogleDrive}
-                                        disabled={isDisconnectingDrive}
+                                        className={`btn-secondary gap-2 ${driveConnected ? 'bg-red-500/10 hover:bg-red-500/20 text-red-500 border-red-500/20' : ''}`}
+                                        onClick={handleConnectGoogleDrive}
+                                        disabled={!driveReady}
+                                        style={driveConnected ? { color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.2)' } : {}}
                                     >
-                                        {isDisconnectingDrive ? 'Disconnecting...' : 'Disconnect Drive'}
+                                        <Cloud className="w-4 h-4" />
+                                        {driveConnected ? 'Reconnect Drive' : 'Connect Drive'}
                                     </button>
-                                )}
+                                    {driveConnected && (
+                                        <button
+                                            type="button"
+                                            className="btn-secondary gap-2"
+                                            onClick={handleDisconnectGoogleDrive}
+                                            disabled={isDisconnectingDrive}
+                                        >
+                                            {isDisconnectingDrive ? 'Disconnecting...' : 'Disconnect Drive'}
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     )}
