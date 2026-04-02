@@ -108,30 +108,6 @@ You can pick your provider and save keys from Settings.
 Keys are stored encrypted in the `api_credentials` table and are only used server-side when calling provider APIs.
 They are not returned back to the frontend after saving.
 
-Optional environment variables:
-
-```env
-VITE_AI_PROVIDER=glm
-
-# GLM
-VITE_GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4/chat/completions
-VITE_GLM_MODEL=glm-4.7-flash
-
-# Groq
-VITE_GROQ_BASE_URL=https://api.groq.com/openai/v1/chat/completions
-VITE_GROQ_MODEL=openai/gpt-oss-120b
-
-# Mistral
-VITE_MISTRAL_BASE_URL=https://api.mistral.ai/v1/chat/completions
-VITE_MISTRAL_MODEL=magistral-small-latest
-
-# DeepSeek
-VITE_DEEPSEEK_BASE_URL=https://api.deepseek.com/chat/completions
-VITE_DEEPSEEK_MODEL=deepseek-chat
-```
-
-Provider calls are made from the backend API (`/api/app/ai/tutor`) so API keys stay server-side.
-
 ## Puter.js Integration
 
 This app now loads Puter.js from:
