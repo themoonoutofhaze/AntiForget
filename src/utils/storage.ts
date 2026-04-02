@@ -82,7 +82,7 @@ const DEFAULT_STATE: SynapseStorage = {
 
 export const getStorage = async (): Promise<SynapseStorage> => {
     try {
-        const serverData = await apiGet<Partial<SynapseStorage>>('/storage');
+        const serverData = await apiGet<Partial<SynapseStorage> & { ai_language?: string }>('/storage');
         const parsedProvider = serverData.aiProvider;
         const aiProvider: AiProvider =
             parsedProvider === 'openai' || parsedProvider === 'groq' || parsedProvider === 'mistral' || parsedProvider === 'nvidia' || parsedProvider === 'openrouter' || parsedProvider === 'gemini' || parsedProvider === 'claude'
@@ -104,6 +104,7 @@ export const getStorage = async (): Promise<SynapseStorage> => {
         return {
             ...DEFAULT_STATE,
             ...serverData,
+            aiLanguage: (serverData.aiLanguage || serverData.ai_language || 'English').trim() || 'English',
             nodes: normalizedNodes,
             missedQuestionHistoryByTopic: normalizedMissedHistory,
             aiProvider,

@@ -397,6 +397,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
     const handleSave = async () => {
         setSaveState('saving');
         try {
+            // Persist revision settings first so language/time/profile are saved
+            // even if a later model/key/priority call encounters an issue.
+            await updateStorage({
+                dailyRevisionMinutesLimit: clampDailyLimit(dailyRevisionMinutesLimit),
+                studentEducationLevel: studentEducationLevel.trim() || 'high school',
+                studentMajor: studentMajor.trim(),
+                studentFocusTopic: studentFocusTopic.trim(),
+                aiLanguage: aiLanguage.trim() || 'English',
+            });
+
             const saveOps: Promise<unknown>[] = [];
             
             // If the user is saving keys for the first time or updating them,
@@ -471,11 +481,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
             setManualPriorityIds(reconciledSavedPriority);
 
             await updateStorage({
-                dailyRevisionMinutesLimit: clampDailyLimit(dailyRevisionMinutesLimit),
-                studentEducationLevel: studentEducationLevel.trim() || 'high school',
-                studentMajor: studentMajor.trim(),
-                studentFocusTopic: studentFocusTopic.trim(),
-                aiLanguage: aiLanguage.trim() || 'English',
                 aiModelPriority: reconciledSavedPriority,
             });
 

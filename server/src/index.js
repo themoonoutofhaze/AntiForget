@@ -168,7 +168,7 @@ const normalizeAiLanguage = (value) => {
     return 'English';
   }
 
-  const normalized = value.trim();
+  const normalized = value.replace(/\s+/g, ' ').trim();
   if (!normalized) {
     return 'English';
   }
@@ -1596,6 +1596,7 @@ app.patch('/api/app/storage', async (req, res) => {
       typeof payload.studentMajor === 'string' ||
       typeof payload.studentFocusTopic === 'string' ||
       typeof payload.aiLanguage === 'string' ||
+      typeof payload.ai_language === 'string' ||
       typeof payload.missedQuestionHistoryByTopic !== 'undefined' ||
       typeof payload.aiProvider === 'string' ||
       typeof payload.aiModelOverrides !== 'undefined'
@@ -1605,6 +1606,10 @@ app.patch('/api/app/storage', async (req, res) => {
            FROM user_preferences WHERE user_id = ?`,
         [userId]
       );
+
+      const incomingAiLanguage = typeof payload.aiLanguage === 'string'
+        ? payload.aiLanguage
+        : (typeof payload.ai_language === 'string' ? payload.ai_language : null);
 
       await db.run(
         `UPDATE user_preferences
@@ -1643,8 +1648,8 @@ app.patch('/api/app/storage', async (req, res) => {
           typeof payload.studentFocusTopic === 'string'
             ? payload.studentFocusTopic.trim().slice(0, 240)
             : (currentPref?.student_focus_topic || ''),
-          typeof payload.aiLanguage === 'string'
-            ? normalizeAiLanguage(payload.aiLanguage)
+          incomingAiLanguage !== null
+            ? normalizeAiLanguage(incomingAiLanguage)
             : normalizeAiLanguage(currentPref?.ai_language || 'English'),
           typeof payload.missedQuestionHistoryByTopic === 'object' && payload.missedQuestionHistoryByTopic !== null
             ? JSON.stringify(payload.missedQuestionHistoryByTopic)
