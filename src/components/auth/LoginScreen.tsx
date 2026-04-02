@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useGoogleLogin } from '@react-oauth/google';
 import { KeyRound, ShieldCheck, Sparkles, BookOpen, Network, Github, Eye, EyeOff } from 'lucide-react';
 import type { AuthUser } from '../../utils/auth';
+import { LoadingCircleOverlay } from '../ui/LoadingCircleOverlay';
 import {
     authenticateWithPasskey,
     getRegisteredPasskeyUsers,
@@ -35,18 +36,25 @@ function hexToRgb(hex: string): string {
 const GoogleSignInRow: React.FC<{
     onSuccess: (user: AuthUser, options?: { keepToken?: boolean }) => void;
     onError: () => void;
-}> = ({ onSuccess, onError }) => {
+    onLoadingChange: (isLoading: boolean) => void;
+}> = ({ onSuccess, onError, onLoadingChange }) => {
     const [hovered, setHovered] = useState(false);
     const login = useGoogleLogin({
         onSuccess: async (tokenResponse) => {
+            onLoadingChange(true);
             try {
                 const { user } = await verifyGoogleAccessTokenWithServer(tokenResponse.access_token);
                 onSuccess(user);
             } catch {
                 onError();
+            } finally {
+                onLoadingChange(false);
             }
         },
-        onError,
+        onError: () => {
+            onLoadingChange(false);
+            onError();
+        },
     });
 
     const rgb = hexToRgb('#4285F4');
@@ -98,6 +106,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ hasGoogleClientId, onL
     const [showPassword, setShowPassword] = useState(false);
     const [passkeyName, setPasskeyName] = useState('');
     const [passkeyHovered, setPasskeyHovered] = useState(false);
+    const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
     const passkeyAvailable = useMemo(() => isPasskeySupported(), []);
     const registeredPasskeyUsers = useMemo(() => getRegisteredPasskeyUsers(), []);
@@ -323,6 +332,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ hasGoogleClientId, onL
                             <GoogleSignInRow
                                 onSuccess={onLogin}
                                 onError={() => setAuthError('Google sign-in failed.')}
+                                onLoadingChange={setIsGoogleLoading}
                             />
                         ) : (
                             <div
@@ -457,6 +467,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ hasGoogleClientId, onL
                     </div>
                 </div>
             </div>
+
+            <LoadingCircleOverlay
+                visible={isGoogleLoading}
+                label="Signing you in..."
+            />
 
             {/* ─── RIGHT PANEL: Decorative ─── */}
             <div

@@ -13,6 +13,7 @@ import { getApiCredentialStatus, getUserModels, addUserModel } from './utils/gem
 import { apiGet } from './utils/api/client';
 import { isPuterAvailable, puterChat } from './utils/puter';
 import { LoginScreen } from './components/auth/LoginScreen';
+import { LoadingCircleOverlay } from './components/ui/LoadingCircleOverlay';
 import { CheckCircle2, ArrowRight, Bot, Cloud, KeyRound, X } from 'lucide-react';
 import {
     clearStoredUser,
@@ -369,6 +370,7 @@ function App() {
         return savedTheme === 'dark' ? 'dark' : 'light';
     });
     const [timeTick, setTimeTick] = useState(() => Date.now());
+    const [hasCompletedInitialDashboardLoad, setHasCompletedInitialDashboardLoad] = useState(false);
     const isArenaSetupReady = setupChecklist.hasAnyApiKey || setupChecklist.hasPuterModel;
 
     const theme: Theme = themeMode === 'auto' ? getThemeFromTime(new Date(timeTick)) : themeMode;
@@ -405,6 +407,17 @@ function App() {
             setDailyGoal(Math.max(1, Math.floor((s.dailyRevisionMinutesLimit || 60) / 20)));
         });
     }, [currentView, user]);
+
+    useEffect(() => {
+        if (!user) {
+            setHasCompletedInitialDashboardLoad(false);
+            return;
+        }
+
+        if (!setupChecklist.isLoading) {
+            setHasCompletedInitialDashboardLoad(true);
+        }
+    }, [setupChecklist.isLoading, user]);
 
     const refreshSetupChecklist = async () => {
         if (!user) {
@@ -534,80 +547,87 @@ function App() {
     }
 
     return (
-        <MainLayout
-            completedRevisions={completedRevisions}
-            dailyReviewGoal={dailyGoal}
-            user={user}
-            onLogout={handleLogout}
-            theme={theme}
-            onToggleTheme={handleToggleTheme}
-            isSidebarOpen={isSidebarOpen}
-            onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
-            onCloseSidebar={() => setIsSidebarOpen(false)}
-            sidebar={
-                <Sidebar
-                    currentView={currentView}
-                    onNavigate={handleNavigate}
-                    isFolded={isSidebarFolded}
-                    onToggleFold={() => setIsSidebarFolded(!isSidebarFolded)}
-                />
-            }
-        >
-            {currentView === 'home' && (
-                <DashboardHome
-                    user={user}
-                    completedRevisions={completedRevisions}
-                    dailyGoal={dailyGoal}
-                    onNavigate={handleNavigate}
-                    setup={setupChecklist}
-                    onOpenSettingsSection={handleOpenSettingsSection}
-                    onRunPuterQuickSetup={handlePuterQuickSetup}
-                    isPuterSetupRunning={isPuterSetupRunning}
-                    isSetupChecklistDismissed={isSetupChecklistDismissed}
-                    onDismissSetupChecklist={handleDismissSetupChecklist}
-                />
-            )}
-            {currentView === 'distill' && (
-                <div className={isTopicModeActive ? 'topics-layout topics-layout--single' : 'topics-layout'}>
-                    <section className="topics-layout-form">
-                        <DistillationTray onTopicModeActiveChange={setIsTopicModeActive} />
-                    </section>
-                    {!isTopicModeActive && (
-                        <section className="topics-layout-graph">
-                            <KnowledgeGraph embedded />
-                        </section>
-                    )}
-                </div>
-            )}
-            {currentView === 'arena' && (
-                setupChecklist.isLoading ? (
-                    <div className="animate-slide-up max-w-xl mx-auto text-center py-10">
-                        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                            Checking AI setup...
-                        </p>
-                    </div>
-                ) : isArenaSetupReady ? (
-                    <SocraticArena />
-                ) : (
-                    <SocraticSetupRequired onOpenSettingsSection={handleOpenSettingsSection} />
-                )
-            )}
-            {currentView === 'settings' && (
-                <div className="settings-section-container p-6">
-                    <SettingsPanel
-                        theme={theme}
-                        themeMode={themeMode}
-                        onSetThemeMode={setThemeMode}
-                        initialSection={settingsSectionFocus}
+        <>
+            <MainLayout
+                completedRevisions={completedRevisions}
+                dailyReviewGoal={dailyGoal}
+                user={user}
+                onLogout={handleLogout}
+                theme={theme}
+                onToggleTheme={handleToggleTheme}
+                isSidebarOpen={isSidebarOpen}
+                onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
+                onCloseSidebar={() => setIsSidebarOpen(false)}
+                sidebar={
+                    <Sidebar
+                        currentView={currentView}
+                        onNavigate={handleNavigate}
+                        isFolded={isSidebarFolded}
+                        onToggleFold={() => setIsSidebarFolded(!isSidebarFolded)}
                     />
-                </div>
-            )}
-            {currentView === 'info' && (
-                <div className="help-info-section-container p-6">
-                    <InfoGuide />
-                </div>
-            )}
-        </MainLayout>
+                }
+            >
+                {currentView === 'home' && (
+                    <DashboardHome
+                        user={user}
+                        completedRevisions={completedRevisions}
+                        dailyGoal={dailyGoal}
+                        onNavigate={handleNavigate}
+                        setup={setupChecklist}
+                        onOpenSettingsSection={handleOpenSettingsSection}
+                        onRunPuterQuickSetup={handlePuterQuickSetup}
+                        isPuterSetupRunning={isPuterSetupRunning}
+                        isSetupChecklistDismissed={isSetupChecklistDismissed}
+                        onDismissSetupChecklist={handleDismissSetupChecklist}
+                    />
+                )}
+                {currentView === 'distill' && (
+                    <div className={isTopicModeActive ? 'topics-layout topics-layout--single' : 'topics-layout'}>
+                        <section className="topics-layout-form">
+                            <DistillationTray onTopicModeActiveChange={setIsTopicModeActive} />
+                        </section>
+                        {!isTopicModeActive && (
+                            <section className="topics-layout-graph">
+                                <KnowledgeGraph embedded />
+                            </section>
+                        )}
+                    </div>
+                )}
+                {currentView === 'arena' && (
+                    setupChecklist.isLoading ? (
+                        <div className="animate-slide-up max-w-xl mx-auto text-center py-10">
+                            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                                Checking AI setup...
+                            </p>
+                        </div>
+                    ) : isArenaSetupReady ? (
+                        <SocraticArena />
+                    ) : (
+                        <SocraticSetupRequired onOpenSettingsSection={handleOpenSettingsSection} />
+                    )
+                )}
+                {currentView === 'settings' && (
+                    <div className="settings-section-container p-6">
+                        <SettingsPanel
+                            theme={theme}
+                            themeMode={themeMode}
+                            onSetThemeMode={setThemeMode}
+                            initialSection={settingsSectionFocus}
+                        />
+                    </div>
+                )}
+                {currentView === 'info' && (
+                    <div className="help-info-section-container p-6">
+                        <InfoGuide />
+                    </div>
+                )}
+            </MainLayout>
+
+            <LoadingCircleOverlay
+                visible={Boolean(user) && !hasCompletedInitialDashboardLoad && setupChecklist.isLoading}
+                label="Loading your dashboard..."
+            />
+        </>
     );
 }
 
