@@ -1,8 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UploadCloud, CheckCircle, Trash2, Pencil, ArrowLeft } from 'lucide-react';
-import { savePdfBlob, deletePdfBlob } from '../../utils/idb';
+import { UploadCloud, CheckCircle, Trash2, Pencil, ArrowLeft, X } from 'lucide-react';
+import { savePdfBlob, deletePdfBlob, validateUploadFile } from '../../utils/idb';
 import { createNode, getStorage, updateStorage } from '../../utils/storage';
+import { apiGet } from '../../utils/api/client';
 import type { GraphNode } from '../../utils/storage';
+
+type TrayNotice = {
+    kind: 'success' | 'error';
+    message: string;
+};
+
+type PendingDelete = {
+    id: string;
+    title: string;
+};
 
 type DistillationTrayProps = {
     onTopicModeActiveChange?: (isActive: boolean) => void;
@@ -11,6 +22,7 @@ type DistillationTrayProps = {
 export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeActiveChange }) => {
     const [mode, setMode] = useState<'new' | 'edit' | null>(null);
     const [existingTopics, setExistingTopics] = useState<GraphNode[]>([]);
+    const [isLoadingTopics, setIsLoadingTopics] = useState(true);
     const [selectedTopicId, setSelectedTopicId] = useState('');
     const [sourceFile, setSourceFile] = useState<File | null>(null);
     const [title, setTitle] = useState('');
@@ -22,13 +34,35 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
     const [deletingTopicId, setDeletingTopicId] = useState<string | null>(null);
     const [linkedTopicIds, setLinkedTopicIds] = useState<string[]>([]);
     const [linkSearchQuery, setLinkSearchQuery] = useState('');
+    const [notice, setNotice] = useState<TrayNotice | null>(null);
+    const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+    const [driveConnected, setDriveConnected] = useState(false);
+    const [isCheckingDriveConnection, setIsCheckingDriveConnection] = useState(true);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         const loadTopics = async () => {
-            const storage = await getStorage();
-            setExistingTopics(storage.nodes);
+            try {
+                setIsLoadingTopics(true);
+                const [storage, fileSettings] = await Promise.all([
+                    getStorage(),
+                    apiGet<{
+                        provider: 'google-drive';
+                        driveConnected: boolean;
+                        driveReady: boolean;
+                    }>('/settings/storage-provider').catch(() => ({
+                        provider: 'google-drive' as const,
+                        driveConnected: false,
+                        driveReady: false,
+                    })),
+                ]);
+                setExistingTopics(storage.nodes);
+                setDriveConnected(fileSettings.driveConnected && fileSettings.driveReady);
+            } finally {
+                setIsLoadingTopics(false);
+                setIsCheckingDriveConnection(false);
+            }
         };
         loadTopics();
     }, []);
@@ -36,6 +70,16 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
     useEffect(() => {
         onTopicModeActiveChange?.(mode !== null);
     }, [mode, onTopicModeActiveChange]);
+
+    useEffect(() => {
+        if (!notice) return;
+        const timer = window.setTimeout(() => setNotice(null), 3200);
+        return () => window.clearTimeout(timer);
+    }, [notice]);
+
+    const showNotice = (kind: TrayNotice['kind'], message: string) => {
+        setNotice({ kind, message });
+    };
 
     const parseTags = (raw: string): string[] =>
         raw
@@ -67,20 +111,17 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
         );
     };
 
-    const handleDeleteTopic = async (topic: GraphNode) => {
-        const confirmed = window.confirm(
-            `Delete "${topic.title}"? This will remove its summary, tags, graph links, and review history.`
-        );
-        if (!confirmed) return;
+    const confirmDeleteTopic = async () => {
+        if (!pendingDelete) return;
 
-        setDeletingTopicId(topic.id);
+        setDeletingTopicId(pendingDelete.id);
         try {
             const storage = await getStorage();
-            const updatedNodes = storage.nodes.filter((node) => node.id !== topic.id);
+            const updatedNodes = storage.nodes.filter((node) => node.id !== pendingDelete.id);
             const updatedEdges = storage.edges.filter(
-                (edge) => edge.source !== topic.id && edge.target !== topic.id
+                (edge) => edge.source !== pendingDelete.id && edge.target !== pendingDelete.id
             );
-            const { [topic.id]: _removedRecord, ...remainingFsrsData } = storage.fsrsData;
+            const { [pendingDelete.id]: _removedRecord, ...remainingFsrsData } = storage.fsrsData;
 
             await updateStorage({
                 nodes: updatedNodes,
@@ -88,24 +129,27 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
                 fsrsData: remainingFsrsData,
             });
 
-            if (topic.hasPdfBlob) {
-                await deletePdfBlob(topic.id);
+            const topicToDelete = storage.nodes.find((node) => node.id === pendingDelete.id);
+            if (topicToDelete?.hasPdfBlob) {
+                await deletePdfBlob(pendingDelete.id);
             }
 
             const refreshed = await getStorage();
             setExistingTopics(refreshed.nodes);
-            if (selectedTopicId === topic.id) {
+            if (selectedTopicId === pendingDelete.id) {
                 setSelectedTopicId('');
                 setTitle('');
                 setSummaryText('');
                 setTagsInput('');
                 setSourceFile(null);
             }
+            showNotice('success', 'Topic deleted successfully.');
         } catch (err) {
             console.error('Failed to delete topic:', err);
-            alert('Failed to delete topic. Check console for details.');
+            showNotice('error', 'Failed to delete topic.');
         } finally {
             setDeletingTopicId(null);
+            setPendingDelete(null);
         }
     };
 
@@ -114,18 +158,40 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
         .sort((a, b) => a.title.localeCompare(b.title));
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!driveConnected) {
+            showNotice('error', 'Google Drive is not connected. Connect it in Settings to upload files.');
+            return;
+        }
         if (e.target.files && e.target.files.length > 0) {
             const file = e.target.files[0];
+            try {
+                validateUploadFile(file, file.name);
+            } catch (error) {
+                setSourceFile(null);
+                showNotice('error', error instanceof Error ? error.message : 'Invalid file.');
+                return;
+            }
             setSourceFile(file);
             if (!title.trim()) setTitle(file.name.replace(/\.(pdf|doc|docx)$/i, ''));
         }
     };
 
     const handleDrop = (e: React.DragEvent) => {
+        if (!driveConnected) {
+            showNotice('error', 'Google Drive is not connected. Connect it in Settings to upload files.');
+            return;
+        }
         e.preventDefault();
         setIsDragging(false);
         const file = e.dataTransfer.files[0];
         if (file) {
+            try {
+                validateUploadFile(file, file.name);
+            } catch (error) {
+                setSourceFile(null);
+                showNotice('error', error instanceof Error ? error.message : 'Invalid file.');
+                return;
+            }
             setSourceFile(file);
             if (!title.trim()) setTitle(file.name.replace(/\.(pdf|doc|docx)$/i, ''));
         }
@@ -142,6 +208,8 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
 
             if (mode === 'edit' && selectedTopicId) {
                 const storage = await getStorage();
+                const previousNodes = storage.nodes;
+                const previousEdges = storage.edges;
                 const updatedNodes = storage.nodes.map((node) =>
                     node.id === selectedTopicId
                         ? {
@@ -162,13 +230,30 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
 
                 await updateStorage({ nodes: updatedNodes, edges: [...otherEdges, ...linkedEdges] });
                 if (sourceFile) {
-                    await savePdfBlob(selectedTopicId, sourceFile.name, sourceFile);
+                    try {
+                        await savePdfBlob(selectedTopicId, sourceFile.name, sourceFile);
+                    } catch (uploadError) {
+                        // Keep topic state consistent if external file upload fails.
+                        await updateStorage({ nodes: previousNodes, edges: previousEdges });
+                        throw uploadError;
+                    }
                 }
-                alert('Topic updated successfully!');
+                showNotice('success', 'Topic updated successfully!');
             } else {
                 const storage = await getStorage();
                 const newNode = await createNode(title, summaryText, tags, sourceFile !== null);
-                if (sourceFile) await savePdfBlob(newNode.id, sourceFile.name, sourceFile);
+                if (sourceFile) {
+                    try {
+                        await savePdfBlob(newNode.id, sourceFile.name, sourceFile);
+                    } catch (uploadError) {
+                        const rollbackStorage = await getStorage();
+                        await updateStorage({
+                            nodes: rollbackStorage.nodes.filter((node) => node.id !== newNode.id),
+                            edges: rollbackStorage.edges.filter((edge) => edge.source !== newNode.id && edge.target !== newNode.id),
+                        });
+                        throw uploadError;
+                    }
+                }
                 if (linkedTopicIds.length > 0) {
                     const linkedEdges = linkedTopicIds.map((targetId) => ({
                         id: `${newNode.id}-${targetId}`,
@@ -177,7 +262,7 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
                     }));
                     await updateStorage({ edges: [...storage.edges, ...linkedEdges] });
                 }
-                alert('New topic saved to Knowledge Graph!');
+                showNotice('success', 'New topic saved to Knowledge Graph!');
             }
 
             const refreshed = await getStorage();
@@ -191,7 +276,7 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
             setLinkedTopicIds([]);
         } catch (err) {
             console.error('Failed to save distillation:', err);
-            alert('Failed to save. Check console for details.');
+            showNotice('error', 'Failed to save. ');
         } finally {
             setIsSaving(false);
         }
@@ -208,6 +293,7 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
     const linkableTopics = existingTopics.filter((topic) =>
         mode === 'edit' ? topic.id !== selectedTopicId : true
     );
+    const isFileUploadDisabled = isCheckingDriveConnection || !driveConnected;
 
     const normalizedLinkSearch = linkSearchQuery.toLowerCase().trim();
     const lastThreeLinkableTopics = linkableTopics.slice(-3).reverse();
@@ -242,6 +328,105 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
 
     return (
         <div className="animate-slide-up w-full space-y-5">
+            {notice && (
+                <div className="fixed top-20 right-4 sm:right-6 z-[80] pointer-events-none">
+                    <div
+                        className="pointer-events-auto flex items-start gap-3 rounded-xl border shadow-xl backdrop-blur-md px-4 py-3 min-w-[280px] max-w-[420px] animate-fade-in"
+                        style={{
+                            background:
+                                notice.kind === 'success'
+                                    ? 'color-mix(in srgb, var(--bg-elevated) 86%, #10b981 14%)'
+                                    : 'color-mix(in srgb, var(--bg-elevated) 84%, #ef4444 16%)',
+                            borderColor:
+                                notice.kind === 'success'
+                                    ? 'color-mix(in srgb, #10b981 45%, var(--border-subtle) 55%)'
+                                    : 'color-mix(in srgb, #ef4444 50%, var(--border-subtle) 50%)',
+                        }}
+                        role="status"
+                        aria-live="polite"
+                    >
+                        <CheckCircle
+                            className="w-5 h-5 mt-0.5 shrink-0"
+                            style={{ color: notice.kind === 'success' ? '#10b981' : '#ef4444' }}
+                        />
+                        <p className="text-sm leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+                            {notice.message}
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => setNotice(null)}
+                            className="ml-1 shrink-0 rounded-md p-1 transition-colors"
+                            style={{ color: 'var(--text-secondary)' }}
+                            aria-label="Dismiss notification"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {pendingDelete && (
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-black/45 backdrop-blur-[2px]"
+                        onClick={() => setPendingDelete(null)}
+                        aria-hidden="true"
+                    />
+                    <div
+                        className="relative w-full max-w-md rounded-2xl border shadow-2xl px-5 py-5 sm:px-6 sm:py-6 animate-fade-in"
+                        style={{
+                            background: '#ffffff',
+                            borderColor: 'color-mix(in srgb, #ef4444 35%, var(--border-subtle) 65%)',
+                        }}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="delete-topic-title"
+                        aria-describedby="delete-topic-description"
+                    >
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <h3 id="delete-topic-title" className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+                                    Delete Topic?
+                                </h3>
+                                <p id="delete-topic-description" className="mt-2 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                                    This will permanently remove "{pendingDelete.title}" along with its summary, tags, graph links, and review history.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setPendingDelete(null)}
+                                className="rounded-md p-1 shrink-0"
+                                style={{ color: 'var(--text-secondary)' }}
+                                aria-label="Close delete confirmation"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="mt-5 flex items-center justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setPendingDelete(null)}
+                                className="btn-secondary px-4 py-2"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={confirmDeleteTopic}
+                                disabled={deletingTopicId === pendingDelete.id}
+                                className="btn-primary px-4 py-2"
+                                style={{
+                                    background: '#ef4444',
+                                    borderColor: '#ef4444',
+                                }}
+                            >
+                                {deletingTopicId === pendingDelete.id ? 'Deleting...' : 'Delete Topic'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ── No mode: header + mode picker ── */}
             {!mode && (
@@ -345,7 +530,12 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
                                 padding: 6,
                             }}
                         >
-                            {filteredTopics.length === 0 ? (
+                            {isLoadingTopics ? (
+                                <div className="px-2 py-2 flex items-center gap-2 loading-dots">
+                                    <span /><span /><span />
+                                    <span className="text-xs ml-1" style={{ color: 'var(--text-muted)' }}>Loading topics...</span>
+                                </div>
+                            ) : filteredTopics.length === 0 ? (
                                 <p className="text-xs px-2 py-2" style={{ color: 'var(--text-muted)' }}>
                                     {existingTopics.length === 0
                                         ? 'No topics yet. Create your first topic using the Create New Topic mode.'
@@ -374,7 +564,7 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
                                                 </button>
                                                 <button
                                                     type="button"
-                                                    onClick={() => handleDeleteTopic(topic)}
+                                                    onClick={() => setPendingDelete({ id: topic.id, title: topic.title })}
                                                     disabled={deletingTopicId === topic.id}
                                                     className="btn-secondary text-xs px-3 py-1.5 shrink-0"
                                                     style={{ color: '#ef4444', borderColor: 'rgba(239,68,68,0.35)' }}
@@ -483,7 +673,12 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
                                 padding: 6,
                             }}
                         >
-                            {linkableTopics.length === 0 ? (
+                            {isLoadingTopics ? (
+                                <div className="px-2 py-2 flex items-center gap-2 loading-dots">
+                                    <span /><span /><span />
+                                    <span className="text-xs ml-1" style={{ color: 'var(--text-muted)' }}>Loading topics...</span>
+                                </div>
+                            ) : linkableTopics.length === 0 ? (
                                 <p className="text-xs px-2 py-2" style={{ color: 'var(--text-muted)' }}>
                                     No other topics available to link yet.
                                 </p>
@@ -639,14 +834,26 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
                             </p>
                             <div
                                 id="file-drop-zone"
-                                onClick={() => fileInputRef.current?.click()}
-                                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                                onClick={() => {
+                                    if (isFileUploadDisabled) return;
+                                    fileInputRef.current?.click();
+                                }}
+                                onDragOver={(e) => {
+                                    if (isFileUploadDisabled) return;
+                                    e.preventDefault();
+                                    setIsDragging(true);
+                                }}
                                 onDragLeave={() => setIsDragging(false)}
-                                onDrop={handleDrop}
-                                className="flex items-center gap-3 rounded-lg px-4 py-3 cursor-pointer transition-colors"
+                                onDrop={(e) => {
+                                    if (isFileUploadDisabled) return;
+                                    handleDrop(e);
+                                }}
+                                className="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors"
                                 style={{
                                     border: `1px dashed ${isDragging ? 'var(--accent-primary)' : 'var(--border-strong)'}`,
                                     background: isDragging ? 'var(--bg-subtle)' : 'transparent',
+                                    cursor: isFileUploadDisabled ? 'not-allowed' : 'pointer',
+                                    opacity: isFileUploadDisabled ? 0.65 : 1,
                                 }}
                             >
                                 <UploadCloud
@@ -676,9 +883,15 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
                                     ref={fileInputRef}
                                     onChange={handleFileUpload}
                                     accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                    disabled={isFileUploadDisabled}
                                     className="hidden"
                                 />
                             </div>
+                            {!isCheckingDriveConnection && !driveConnected && (
+                                <p className="text-xs" style={{ color: '#ef4444' }}>
+                                    File upload is disabled because your Google Drive is not connected. Connect your Google Drive in Settings to use file upload.
+                                </p>
+                            )}
                         </div>
                     </div>
 
@@ -707,7 +920,12 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
                                 padding: 6,
                             }}
                         >
-                            {linkableTopics.length === 0 ? (
+                            {isLoadingTopics ? (
+                                <div className="px-2 py-2 flex items-center gap-2 loading-dots">
+                                    <span /><span /><span />
+                                    <span className="text-xs ml-1" style={{ color: 'var(--text-muted)' }}>Loading topics...</span>
+                                </div>
+                            ) : linkableTopics.length === 0 ? (
                                 <p className="text-xs px-2 py-2" style={{ color: 'var(--text-muted)' }}>
                                     No other topics available to link yet.
                                 </p>

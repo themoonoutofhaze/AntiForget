@@ -3,11 +3,11 @@ import { createPortal } from 'react-dom';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { KeyRound, Moon, Save, Sun, Palette, CheckCircle2, HardDrive, Cloud, FolderOpen, Clock3, GraduationCap, Bot, GripVertical, Plus, Trash2, ChevronDown } from 'lucide-react';
+import { KeyRound, Moon, Save, Sun, Palette, CheckCircle2, HardDrive, Cloud, Clock3, GraduationCap, Bot, GripVertical, Plus, Trash2, ChevronDown } from 'lucide-react';
 import type { IconType } from 'react-icons';
 import * as SiIcons from 'react-icons/si';
 import { getStorage, updateStorage, type AiProvider } from '../../utils/storage';
-import { apiGet, apiPost, apiPut } from '../../utils/api/client';
+import { apiGet } from '../../utils/api/client';
 import { addUserModel, deleteUserModel, getApiCredentialStatus, getUserModels, saveApiCredential, saveModelPrioritySettings, testApiConnectivity, type ModelProvider, type PrioritizedModelCandidate } from '../../utils/gemini';
 import { isPuterAvailable, puterChat } from '../../utils/puter';
 
@@ -15,6 +15,7 @@ interface SettingsPanelProps {
     theme: 'light' | 'dark';
     themeMode: 'light' | 'dark' | 'auto';
     onSetThemeMode: (mode: 'light' | 'dark' | 'auto') => void;
+    initialSection?: 'ai-models' | 'storage' | null;
 }
 
 const reconcilePriorityOrder = (priorityIds: string[], availableModels: PrioritizedModelCandidate[]): string[] => {
@@ -107,7 +108,7 @@ const SortableModelRow: React.FC<SortableModelRowProps> = ({ model, index, provi
     );
 };
 
-export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, onSetThemeMode }) => {
+export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, onSetThemeMode, initialSection = null }) => {
     const modelProviderOptions: ModelProvider[] = ['openai', 'groq', 'mistral', 'nvidia', 'openrouter', 'gemini', 'claude', 'puter'];
 
     const [openSection, setOpenSection] = useState<'appearance' | 'user-information' | 'ai-models' | 'storage' | null>(null);
@@ -155,11 +156,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
         claude: '',
         puter: '',
     });
-    const [storageProvider, setStorageProvider] = useState<'local' | 'google-drive'>('local');
     const [driveConnected, setDriveConnected] = useState(false);
     const [driveReady, setDriveReady] = useState(false);
-    const [localFolderPath, setLocalFolderPath] = useState('');
-    const [folderSaveState, setFolderSaveState] = useState<'idle' | 'picking' | 'saved'>('idle');
     const [savedKeyProviders, setSavedKeyProviders] = useState<Record<AiProvider, boolean>>({
         openai: false,
         groq: false,
@@ -332,18 +330,31 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
             }
 
             const fileSettings = await apiGet<{
-                provider: 'local' | 'google-drive';
+                provider: 'google-drive';
                 driveConnected: boolean;
                 driveReady: boolean;
-                localStoragePath?: string;
             }>('/settings/storage-provider');
-            setStorageProvider(fileSettings.provider);
             setDriveConnected(fileSettings.driveConnected);
             setDriveReady(fileSettings.driveReady);
-            setLocalFolderPath(fileSettings.localStoragePath || '');
         };
         load();
     }, []);
+
+    useEffect(() => {
+        if (!initialSection) {
+            return;
+        }
+        setOpenSection(initialSection);
+        
+        // Ensure the section renders first, then smoothly scroll it into view.
+        setTimeout(() => {
+            const sectionId = `settings-section-${initialSection}`;
+            const element = document.getElementById(sectionId);
+            if (element) {
+                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }, 150);
+    }, [initialSection]);
 
     useEffect(() => {
         setManualPriorityIds((prev) => reconcilePriorityOrder(prev, priorityModels));
@@ -516,34 +527,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
             setSavedKeyProviders((prev) => ({ ...prev, [provider]: false }));
         }
         setKeyInputMap[provider]('');
-    };
-
-    const handleSaveStorageProvider = async () => {
-        await apiPut<{ ok: boolean }>('/settings/storage-provider', { provider: storageProvider });
-        const fileSettings = await apiGet<{
-            provider: 'local' | 'google-drive';
-            driveConnected: boolean;
-            driveReady: boolean;
-            localStoragePath?: string;
-        }>('/settings/storage-provider');
-        setStorageProvider(fileSettings.provider);
-        setDriveConnected(fileSettings.driveConnected);
-        setDriveReady(fileSettings.driveReady);
-        setLocalFolderPath(fileSettings.localStoragePath || localFolderPath);
-    };
-
-    const handlePickLocalFolderNative = async () => {
-        setFolderSaveState('picking');
-        try {
-            const response = await apiPost<{ ok: boolean; localStoragePath: string }>('/settings/local-folder/native-picker', {});
-            setLocalFolderPath(response.localStoragePath);
-            setFolderSaveState('saved');
-            setTimeout(() => setFolderSaveState('idle'), 1500);
-        } catch (error) {
-            console.error(error);
-            setFolderSaveState('idle');
-            alert(error instanceof Error ? error.message : 'Failed to choose folder.');
-        }
     };
 
     const handleConnectGoogleDrive = async () => {
@@ -871,7 +854,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                     )}
                 </div>
 
-                <div className="glass-card p-4">
+                <div className="glass-card p-4" id="settings-section-ai-models">
                     <button
                         type="button"
                         onClick={() => setOpenSection((prev) => (prev === 'ai-models' ? null : 'ai-models'))}
@@ -1118,7 +1101,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                     )}
                 </div>
 
-                <div className="glass-card p-4">
+                <div className="glass-card p-4" id="settings-section-storage">
                     <button
                         type="button"
                         onClick={() => setOpenSection((prev) => (prev === 'storage' ? null : 'storage'))}
@@ -1146,86 +1129,33 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                     {openSection === 'storage' && (
                         <div className="mt-4 pt-4 space-y-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
                             <div className="space-y-2">
-                                <label htmlFor="file-storage-provider" className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
+                                <label className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
                                     Storage Provider
                                 </label>
-                                <select
-                                    id="file-storage-provider"
-                                    value={storageProvider}
-                                    onChange={(e) => setStorageProvider(e.target.value as 'local' | 'google-drive')}
-                                    className="input-field"
-                                >
-                                    <option value="local">Local server folder</option>
-                                    <option value="google-drive">Google Drive</option>
-                                </select>
+                                <div className="input-field" style={{ display: 'flex', alignItems: 'center' }}>
+                                    Google Drive
+                                </div>
                             </div>
 
-                            {storageProvider === 'google-drive' && (
-                                <div
-                                    className="rounded-xl p-3 flex items-center justify-between gap-3"
-                                    style={subsectionPanelStyle}
-                                >
-                                    <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                                        {!driveReady
-                                            ? 'Google Drive OAuth is not configured on the server yet.'
-                                            : driveConnected
-                                                ? 'Google Drive is connected for this account.'
-                                                : 'Connect your Google Drive account to upload files there.'}
-                                    </div>
-                                    <button
-                                        type="button"
-                                        className="btn-secondary gap-2"
-                                        onClick={handleConnectGoogleDrive}
-                                        disabled={!driveReady}
-                                    >
-                                        <Cloud className="w-4 h-4" />
-                                        {driveConnected ? 'Reconnect Drive' : 'Connect Drive'}
-                                    </button>
+                            <div
+                                className="rounded-xl p-3 flex items-center justify-between gap-3"
+                                style={subsectionPanelStyle}
+                            >
+                                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                                    {!driveReady
+                                        ? 'Google Drive OAuth is not configured on the server yet.'
+                                        : driveConnected
+                                            ? 'Google Drive is connected for this account.'
+                                            : 'Connect your Google Drive account to upload files there.'}
                                 </div>
-                            )}
-
-                            {storageProvider === 'local' && (
-                                <div className="space-y-2">
-                                    <label htmlFor="local-folder-path" className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-                                        Local Folder Path (on server machine)
-                                    </label>
-                                    <input
-                                        id="local-folder-path"
-                                        type="text"
-                                        value={localFolderPath}
-                                        readOnly
-                                        className="input-field"
-                                        placeholder="No folder selected"
-                                    />
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            type="button"
-                                            className="btn-secondary gap-2"
-                                            onClick={handlePickLocalFolderNative}
-                                            disabled={folderSaveState === 'picking'}
-                                        >
-                                            <FolderOpen className="w-4 h-4" />
-                                            {folderSaveState === 'picking' ? 'Opening Finder…' : 'Choose Folder (Native)'}
-                                        </button>
-                                        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                                            Opens Finder and saves your selection immediately.
-                                        </span>
-                                    </div>
-                                    {folderSaveState === 'saved' && (
-                                        <p className="text-[11px]" style={{ color: 'var(--accent-primary)' }}>
-                                            Local folder saved.
-                                        </p>
-                                    )}
-                                </div>
-                            )}
-
-                            <div className="flex justify-end">
                                 <button
-                                    id="save-storage-provider-btn"
-                                    onClick={handleSaveStorageProvider}
-                                    className="btn-primary"
+                                    type="button"
+                                    className="btn-secondary gap-2"
+                                    onClick={handleConnectGoogleDrive}
+                                    disabled={!driveReady}
                                 >
-                                    Save Storage Choice
+                                    <Cloud className="w-4 h-4" />
+                                    {driveConnected ? 'Reconnect Drive' : 'Connect Drive'}
                                 </button>
                             </div>
                         </div>

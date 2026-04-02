@@ -4,7 +4,7 @@ import { Timer } from '../ui/Timer';
 import { RichTextMessage } from '../ui/RichTextMessage';
 import { addRevisionSeconds, getTodaysReviews, processReview } from '../../utils/fsrs';
 import { getStorage, updateStorage, type AiProvider } from '../../utils/storage';
-import { calculateAverageScore, extractQuestionScores, generateTutorResponse, getApiCredentialStatus, getProviderLabel, saveApiCredential, type TutorTopicContext, type AiAttempt, type ModelProvider } from '../../utils/gemini';
+import { calculateAverageScore, extractQuestionScores, generateTutorResponse, getApiCredentialStatus, getProviderLabel, getUserModels, saveApiCredential, type TutorTopicContext, type AiAttempt, type ModelProvider } from '../../utils/gemini';
 import { primePuterAuth } from '../../utils/puter';
 
 /* ──────────────────────────────────────────────────────────────
@@ -123,9 +123,10 @@ const convertAverageToMastery = (score: number): number => {
 export const SocraticArena: React.FC = () => {
     const [provider, setProvider] = useState<AiProvider>('openai');
     const [apiKey, setApiKey] = useState('');
-    const [hasApiKey, setHasApiKey] = useState(false);
+    const [hasAiAccess, setHasAiAccess] = useState(false);
     const [apiKeyError, setApiKeyError] = useState<string | null>(null);
     const [dueNodes, setDueNodes] = useState<string[]>([]);
+    const [isInitializing, setIsInitializing] = useState(true);
     const [currentNodeId, setCurrentNodeId] = useState<string | null>(null);
 
     /* Quiz state */
@@ -158,37 +159,50 @@ export const SocraticArena: React.FC = () => {
     /* ── Load config ── */
     useEffect(() => {
         const loadConfig = async () => {
-            const storage = await getStorage();
-            const credentialStatus = await getApiCredentialStatus();
+            try {
+                setIsInitializing(true);
+                const storage = await getStorage();
+                const [credentialStatus, userModels] = await Promise.all([
+                    getApiCredentialStatus(),
+                    getUserModels().catch(() => ({ activeProviders: [], models: [] })),
+                ]);
 
-            const hydratedKeys: Record<AiProvider, string> = {
-                openai: credentialStatus.providers.openai ? 'configured-on-server' : '',
-                groq: credentialStatus.providers.groq ? 'configured-on-server' : '',
-                mistral: credentialStatus.providers.mistral ? 'configured-on-server' : '',
-                nvidia: credentialStatus.providers.nvidia ? 'configured-on-server' : '',
-                openrouter: credentialStatus.providers.openrouter ? 'configured-on-server' : '',
-                gemini: credentialStatus.providers.gemini ? 'configured-on-server' : '',
-                claude: credentialStatus.providers.claude ? 'configured-on-server' : '',
-            };
+                const hydratedKeys: Record<AiProvider, string> = {
+                    openai: credentialStatus.providers.openai ? 'configured-on-server' : '',
+                    groq: credentialStatus.providers.groq ? 'configured-on-server' : '',
+                    mistral: credentialStatus.providers.mistral ? 'configured-on-server' : '',
+                    nvidia: credentialStatus.providers.nvidia ? 'configured-on-server' : '',
+                    openrouter: credentialStatus.providers.openrouter ? 'configured-on-server' : '',
+                    gemini: credentialStatus.providers.gemini ? 'configured-on-server' : '',
+                    claude: credentialStatus.providers.claude ? 'configured-on-server' : '',
+                    puter: '',
+                };
 
-            const preferredProvider = (['openai', 'claude', 'gemini', 'openrouter', 'nvidia', 'groq', 'mistral'] as AiProvider[])
-                .find((candidate) => Boolean(hydratedKeys[candidate])) || 'openai';
+                const preferredProvider = (['openai', 'claude', 'gemini', 'openrouter', 'nvidia', 'groq', 'mistral'] as AiProvider[])
+                    .find((candidate) => Boolean(hydratedKeys[candidate])) || 'openai';
 
-            setProvider(preferredProvider);
-            setApiKey('');
-            setHasApiKey(Object.values(credentialStatus.providers).some(Boolean));
+                setProvider(preferredProvider);
+                setApiKey('');
+                const hasConfiguredApiKey = Object.values(credentialStatus.providers).some(Boolean);
+                const hasPuterModel = userModels.models.some((model) => model.provider === 'puter');
+                setHasAiAccess(hasConfiguredApiKey || hasPuterModel);
 
-            const reviews = await getTodaysReviews();
-            setDueNodes(reviews);
+                const reviews = await getTodaysReviews();
+                setDueNodes(reviews);
 
-            const now = Date.now();
-            const dueCount = Object.values(storage.fsrsData).filter((data) => data.due <= now).length;
-            const dailyLimitMinutes = Math.max(10, storage.dailyRevisionMinutesLimit || 60);
-            setSessionMinutesLimit(dailyLimitMinutes);
-            setTimeBudgetReached(dueCount > 0 && storage.revisionSecondsToday >= dailyLimitMinutes * 60);
+                const now = Date.now();
+                const dueCount = Object.values(storage.fsrsData).filter((data) => data.due <= now).length;
+                const dailyLimitMinutes = Math.max(10, storage.dailyRevisionMinutesLimit || 60);
+                setSessionMinutesLimit(dailyLimitMinutes);
+                setTimeBudgetReached(dueCount > 0 && storage.revisionSecondsToday >= dailyLimitMinutes * 60);
+            } catch (error) {
+                console.error('Failed to load Socratic lobby state:', error);
+            } finally {
+                setIsInitializing(false);
+            }
         };
         loadConfig();
-    }, [phase === 'lobby']);
+    }, []);
 
     useEffect(() => {
         return () => { activeRequestRef.current?.abort(); };
@@ -279,6 +293,7 @@ export const SocraticArena: React.FC = () => {
             topicName: node?.title || 'Unknown topic',
             linkedTopicNames,
             summaryContent: node?.summary || 'No summary available.',
+            hasAttachedFile: Boolean(node?.hasPdfBlob),
             studentLevel: (storage.studentEducationLevel || 'high school').trim() || 'high school',
             studentMajor: (storage.studentMajor || '').trim(),
             studentFocusTopic: (storage.studentFocusTopic || '').trim(),
@@ -303,17 +318,18 @@ export const SocraticArena: React.FC = () => {
             openrouter: refreshed.providers.openrouter ? 'configured-on-server' : '',
             gemini: refreshed.providers.gemini ? 'configured-on-server' : '',
             claude: refreshed.providers.claude ? 'configured-on-server' : '',
+            puter: '',
         };
         const preferredProvider = (['openai', 'claude', 'gemini', 'openrouter', 'nvidia', 'groq', 'mistral'] as AiProvider[])
             .find((candidate) => Boolean(refreshedKeys[candidate])) || provider;
         setProvider(preferredProvider);
         setApiKey('');
         setApiKeyError(null);
-        setHasApiKey(Object.values(refreshed.providers).some(Boolean));
+        setHasAiAccess(Object.values(refreshed.providers).some(Boolean));
     };
 
     /* ── Start quiz ── */
-    const startQuiz = async (unrecorded = false) => {
+    const startQuiz = async (unrecorded = false, dueNodeOverride?: string[]) => {
         primePuterAuth();
 
         let nextId: string | null = null;
@@ -322,8 +338,9 @@ export const SocraticArena: React.FC = () => {
             if (storage.nodes.length === 0) return; // no topics to practice
             nextId = storage.nodes[Math.floor(Math.random() * storage.nodes.length)].id;
         } else {
-            if (dueNodes.length === 0) return;
-            nextId = dueNodes[0];
+            const dueQueue = dueNodeOverride || dueNodes;
+            if (dueQueue.length === 0) return;
+            nextId = dueQueue[0];
         }
         if (!nextId) return;
 
@@ -458,6 +475,39 @@ export const SocraticArena: React.FC = () => {
         }
     };
 
+    const skipCurrentTopic = async () => {
+        if (phase !== 'answering') return;
+
+        activeRequestRef.current?.abort();
+        setIsTimerActive(false);
+        setChatOpen(false);
+        setChatMessages([]);
+        setChatInput('');
+        setIsChatSending(false);
+        setChatError(null);
+
+        const elapsed = getElapsedSeconds();
+        setSessionStartedAt(null);
+        if (elapsed > 0 && !isUnrecorded) {
+            await addRevisionSeconds(elapsed);
+        }
+
+        if (isUnrecorded) {
+            await startQuiz(true);
+            return;
+        }
+
+        const nextDueNodes = dueNodes.filter((id) => id !== currentNodeId);
+        setDueNodes(nextDueNodes);
+
+        if (nextDueNodes.length === 0) {
+            await resetToLobby();
+            return;
+        }
+
+        await startQuiz(false, nextDueNodes);
+    };
+
     const resetToLobby = async () => {
         activeRequestRef.current?.abort();
         const elapsed = getElapsedSeconds();
@@ -486,9 +536,28 @@ export const SocraticArena: React.FC = () => {
     };
 
     /* ══════════════════════════════════════════════════════════
+       RENDER — Initial hydration
+    ══════════════════════════════════════════════════════════ */
+    if (isInitializing) {
+        return (
+            <div className="animate-slide-up w-full space-y-6">
+                <div className="glass-card max-w-md mx-auto p-8 text-center space-y-4">
+                    <div className="loading-dots flex items-center justify-center gap-2">
+                        <span /><span /><span />
+                    </div>
+                    <h2 className="section-title text-xl">Loading Socratic review...</h2>
+                    <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                        Syncing API credentials and revision topics.
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
+    /* ══════════════════════════════════════════════════════════
        RENDER — API key gate
     ══════════════════════════════════════════════════════════ */
-    if (!hasApiKey) {
+    if (!hasAiAccess) {
         return (
             <div className="animate-slide-up w-full space-y-6">
                 <div className="glass-card max-w-md mx-auto p-8 text-center space-y-5">
@@ -780,24 +849,34 @@ export const SocraticArena: React.FC = () => {
                                 Fill in all answers — write "I don't know" if you're stuck 🙂
                             </p>
                         )}
-                        <button
-                            id="submit-answers-btn"
-                            onClick={submitAnswers}
-                            disabled={isSubmitting || (!allFilled && answers.every((a) => a.trim() === ''))}
-                            className="btn-primary gap-2"
-                            style={{ minWidth: 220 }}>
-                            {isSubmitting ? (
-                                <>
-                                    <div className="quiz-btn-spinner" />
-                                    Grading…
-                                </>
-                            ) : (
-                                <>
-                                    <Send className="w-4 h-4" />
-                                    Submit Answers
-                                </>
-                            )}
-                        </button>
+                        <div className="flex flex-wrap items-center justify-center gap-3">
+                            <button
+                                id="skip-topic-btn"
+                                onClick={skipCurrentTopic}
+                                disabled={isSubmitting}
+                                className="btn-secondary"
+                                style={{ minWidth: 160 }}>
+                                Skip Topic
+                            </button>
+                            <button
+                                id="submit-answers-btn"
+                                onClick={submitAnswers}
+                                disabled={isSubmitting || (!allFilled && answers.every((a) => a.trim() === ''))}
+                                className="btn-primary gap-2"
+                                style={{ minWidth: 220 }}>
+                                {isSubmitting ? (
+                                    <>
+                                        <div className="quiz-btn-spinner" />
+                                        Grading…
+                                    </>
+                                ) : (
+                                    <>
+                                        <Send className="w-4 h-4" />
+                                        Submit Answers
+                                    </>
+                                )}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

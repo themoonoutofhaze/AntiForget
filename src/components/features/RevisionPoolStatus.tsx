@@ -321,21 +321,30 @@ const TopicRowCard: React.FC<{ row: RevisionRow; rank: number }> = ({ row, rank 
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export const RevisionPoolStatus: React.FC = () => {
+    const PAGE_SIZE = 3;
     const [rows, setRows] = useState<RevisionRow[]>([]);
-    const [showAll, setShowAll] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
     const loadData = async () => {
         try {
+            setIsLoading(true);
             const storage = await getStorage();
             setRows(buildRows(storage.nodes, storage.fsrsData));
         } catch (error) {
             console.error(error);
+        } finally {
+            setIsLoading(false);
         }
     };
 
     useEffect(() => {
         loadData();
     }, []);
+
+    useEffect(() => {
+        setVisibleCount(PAGE_SIZE);
+    }, [rows.length]);
 
     const summary = useMemo(() => {
         const overdue = rows.filter(r => r.status === 'overdue').length;
@@ -350,14 +359,24 @@ export const RevisionPoolStatus: React.FC = () => {
         return { overdue, today, upcoming, avgLearning, newCount, halfwayCount, learnedCount, nextDue, criticalCount };
     }, [rows]);
 
-    const visibleRows = showAll ? rows : rows.slice(0, 5);
+    const visibleRows = rows.slice(0, visibleCount);
+    const hasMoreRows = visibleCount < rows.length;
+    const remainingRows = rows.length - visibleCount;
 
     return (
         <div className="pool-root w-full mx-auto">
             {/* Section header */}
-    
 
-            {rows.length === 0 ? (
+
+            {isLoading ? (
+                <div className="pool-empty">
+                    <div className="loading-dots flex items-center gap-2" style={{ marginBottom: 10 }}>
+                        <span /><span /><span />
+                    </div>
+                    <p style={{ fontWeight: 700, color: 'var(--text-secondary)', margin: '0 0 4px' }}>Loading revision pool...</p>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>Fetching topics and schedule from your dataset.</p>
+                </div>
+            ) : rows.length === 0 ? (
                 <div className="pool-empty">
                     <div style={{ fontSize: '2rem', marginBottom: 8 }}>📚</div>
                     <p style={{ fontWeight: 700, color: 'var(--text-secondary)', margin: '0 0 4px' }}>Pool is empty</p>
@@ -427,9 +446,9 @@ export const RevisionPoolStatus: React.FC = () => {
                             ))}
                         </div>
 
-                        {rows.length > 5 && (
+                        {hasMoreRows && (
                             <button
-                                onClick={() => setShowAll(v => !v)}
+                                onClick={() => setVisibleCount((count) => count + PAGE_SIZE)}
                                 style={{
                                     width: '100%', marginTop: 10, padding: '8px 0',
                                     background: 'var(--bg-muted)', border: '1px solid var(--border-subtle)',
@@ -437,7 +456,7 @@ export const RevisionPoolStatus: React.FC = () => {
                                     color: 'var(--text-secondary)', cursor: 'pointer', transition: 'all 0.2s ease',
                                 }}
                             >
-                                {showAll ? `Show less ↑` : `Show all ${rows.length} topics ↓`}
+                                {`Show ${Math.min(PAGE_SIZE, remainingRows)} more topics ↓`}
                             </button>
                         )}
                     </div>

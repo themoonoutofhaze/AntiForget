@@ -1,5 +1,5 @@
 import React from 'react';
-import { LogOut, Menu, Moon, Sun, Target, X } from 'lucide-react';
+import { Flame, LogOut, Menu, Moon, Sun, X } from 'lucide-react';
 import type { AuthUser } from '../../utils/auth';
 
 interface HeaderProps {
@@ -82,14 +82,14 @@ export const Header: React.FC<HeaderProps> = ({
                                 style={{ transition: 'stroke-dashoffset 1s cubic-bezier(0.4,0,0.2,1)' }}
                             />
                         </svg>
-                        <Target className="absolute w-3.5 h-3.5" style={{ color: 'var(--accent-primary)' }} />
+                        <Flame className="absolute w-3.5 h-3.5" style={{ color: 'var(--accent-primary)' }} />
                     </div>
                     <div className="flex flex-col">
                         <span className="text-[11px] font-semibold" style={{ color: 'var(--text-secondary)' }}>
-                            Daily Goal
+                            Daily Streak
                         </span>
                         <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                            {completedRevisions}/{totalRevisions} reviews
+                            {completedRevisions} day{completedRevisions === 1 ? '' : 's'}
                         </span>
                     </div>
                 </div>

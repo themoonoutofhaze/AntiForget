@@ -1,15 +1,15 @@
 import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import crypto from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import { google } from 'googleapis';
+import * as pdfParseModule from 'pdf-parse';
+import mammoth from 'mammoth';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
@@ -24,10 +24,11 @@ import { buildModelQueue, getModelsForProviders, sanitizeUserModels } from './mo
 
 const projectRootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const clientDistDir = path.join(projectRootDir, 'dist');
+const UPLOAD_MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+const pdfParse = pdfParseModule.default || pdfParseModule;
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
-const execFileAsync = promisify(execFile);
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: UPLOAD_MAX_FILE_SIZE_BYTES } });
 
 app.use(helmet());
 app.use(cors({ origin: config.frontendBaseUrl, credentials: true }));
@@ -51,12 +52,12 @@ const tutorRateLimiter = rateLimit({
 });
 
 const PROVIDERS = new Set(['openai', 'groq', 'mistral', 'nvidia', 'openrouter', 'gemini', 'claude', 'puter']);
-const FILE_PROVIDERS = new Set(['local', 'google-drive']);
 const AUTH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7;
 const AUTH_REFRESH_WINDOW_SECONDS = 60 * 60 * 24 * 2;
 const AUTH_ISSUER = 'antiforget-app';
 const AUTH_COOKIE_NAME = 'af_auth_token';
 const isProduction = process.env.NODE_ENV === 'production';
+const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 const setAuthCookie = (res, token) => {
   res.cookie(AUTH_COOKIE_NAME, token, {
@@ -276,66 +277,6 @@ const removeUserRevisionModel = async (db, userId, modelId) => {
   await db.run(`DELETE FROM user_model_priorities WHERE user_id = ? AND model_id = ?`, [userId, modelId]);
 };
 
-const getConfiguredLocalStoragePath = async (db) => {
-  const row = await db.get(`SELECT value FROM app_settings WHERE key = 'local_storage_path'`);
-  return row?.value || config.uploadsRoot;
-};
-
-const persistLocalStoragePath = async (db, localStoragePath) => {
-  await db.run(
-    `INSERT INTO app_settings(key, value, updated_at)
-     VALUES ('local_storage_path', ?, CURRENT_TIMESTAMP)
-     ON CONFLICT(key)
-     DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
-    [localStoragePath]
-  );
-};
-
-const pickNativeFolderPath = async (defaultPath) => {
-  if (process.platform !== 'darwin') {
-    throw new Error('Native folder picker is currently supported on macOS only.');
-  }
-
-  const fallbackPath = defaultPath && fs.existsSync(defaultPath) ? defaultPath : os.homedir();
-
-  // Sanitize the path: strip any characters that could break out of the AppleScript
-  // string context (quotes, backslashes, control chars). Pass path via env variable
-  // to avoid shell injection entirely.
-  const sanitizedPath = fallbackPath.replace(/[\x00-\x1f"\\]/g, '');
-
-  const { stdout } = await execFileAsync('osascript', [
-    '-e',
-    `set defaultDir to POSIX file "${sanitizedPath}"`,
-    '-e',
-    'set selectedPath to POSIX path of (choose folder with prompt "Select folder for AntiForget uploads" default location defaultDir)',
-    '-e',
-    'return selectedPath',
-  ]);
-
-  return String(stdout || '').trim();
-};
-
-const browseRoot = os.homedir();
-
-const isPathWithinRoot = (targetPath) => {
-  const resolvedRoot = path.resolve(browseRoot);
-  const resolvedTarget = path.resolve(targetPath);
-  return resolvedTarget === resolvedRoot || resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`);
-};
-
-const toSafeBrowsePath = (maybePath) => {
-  if (!maybePath || typeof maybePath !== 'string') {
-    return browseRoot;
-  }
-
-  const resolved = path.resolve(maybePath);
-  if (!isPathWithinRoot(resolved)) {
-    return browseRoot;
-  }
-
-  return resolved;
-};
-
 const getUserId = (req) => {
   if (req.authUserId && typeof req.authUserId === 'string') {
     return req.authUserId;
@@ -423,6 +364,35 @@ const readBearerToken = (req) => {
   }
 
   return token;
+};
+
+const getOriginFromUrl = (value) => {
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+};
+
+const FRONTEND_ORIGIN = getOriginFromUrl(config.frontendBaseUrl);
+
+const isTrustedRequestOrigin = (req) => {
+  const origin = getOriginFromUrl(req.get('origin'));
+  if (origin && FRONTEND_ORIGIN) {
+    return origin === FRONTEND_ORIGIN;
+  }
+
+  const refererOrigin = getOriginFromUrl(req.get('referer'));
+  if (refererOrigin && FRONTEND_ORIGIN) {
+    return refererOrigin === FRONTEND_ORIGIN;
+  }
+
+  // Non-browser clients may omit Origin/Referer entirely.
+  return !origin && !refererOrigin;
 };
 
 const getStorageBundle = async (userId) => {
@@ -702,6 +672,36 @@ const getAvailableCredentialMap = async (db, userId) => {
   return keyMap;
 };
 
+const getCredentialDecryptionSummary = async (db, userId) => {
+  const rows = await db.all(`SELECT provider, ciphertext, iv, tag FROM api_credentials WHERE user_id = ?`, [userId]);
+  const keyMap = {};
+  const failedProviders = [];
+
+  for (const row of rows) {
+    const provider = normalizeProvider(row.provider);
+    if (!PROVIDERS.has(provider)) {
+      continue;
+    }
+
+    try {
+      const decrypted = decryptText(row).trim();
+      if (decrypted) {
+        keyMap[provider] = decrypted;
+      } else {
+        failedProviders.push(provider);
+      }
+    } catch {
+      failedProviders.push(provider);
+    }
+  }
+
+  return {
+    keyMap,
+    totalStoredProviders: rows.length,
+    failedProviders,
+  };
+};
+
 const getProviderErrorMessage = (raw, status) => {
   const text = String(raw || '').trim();
   if (!text) {
@@ -772,7 +772,7 @@ const buildProviderPayload = ({ provider, model, messages, temperature, maxToken
       .filter((message) => message.role !== 'system')
       .map((message) => ({
         role: message.role === 'assistant' ? 'assistant' : 'user',
-        content: String(message.content || ''),
+        content: Array.isArray(message.content) ? message.content : String(message.content || ''),
       }));
 
     return {
@@ -882,6 +882,128 @@ const parseStructuredQuestions = (text) => {
     }
   }
   return questions;
+};
+
+const ATTACHMENT_PROMPT_CHAR_LIMIT = 10000;
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+const truncateForPrompt = (text, maxChars = ATTACHMENT_PROMPT_CHAR_LIMIT) => {
+  if (!text || typeof text !== 'string') {
+    return '';
+  }
+  const cleaned = text.replace(/\0/g, '').trim();
+  if (!cleaned) {
+    return '';
+  }
+  if (cleaned.length <= maxChars) {
+    return cleaned;
+  }
+  return `${cleaned.slice(0, maxChars)}\n...[truncated]`;
+};
+
+const extractAttachmentText = async ({ mimeType, buffer }) => {
+  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
+    return '';
+  }
+
+  if (mimeType === 'application/pdf') {
+    const parsed = await pdfParse(buffer);
+    return parsed?.text || '';
+  }
+
+  if (mimeType === DOCX_MIME) {
+    const parsed = await mammoth.extractRawText({ buffer });
+    return parsed?.value || '';
+  }
+
+  // Legacy .doc extraction is intentionally metadata-only fallback for now.
+  return '';
+};
+
+const providerSupportsNativeAttachment = (provider, attachment) => {
+  if (!attachment) {
+    return false;
+  }
+  // Anthropic Messages supports document blocks with base64 sources.
+  return provider === 'claude';
+};
+
+const appendNativeAttachmentToClaudeMessages = (messages, attachment) => {
+  if (!attachment?.base64 || !attachment?.mimeType) {
+    return messages;
+  }
+
+  const nextMessages = [...messages];
+  for (let i = nextMessages.length - 1; i >= 0; i -= 1) {
+    const entry = nextMessages[i];
+    if (entry.role !== 'user') {
+      continue;
+    }
+
+    const textContent = typeof entry.content === 'string'
+      ? entry.content
+      : Array.isArray(entry.content)
+        ? entry.content
+            .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+            .map((part) => part.text)
+            .join('\n')
+        : '';
+
+    nextMessages[i] = {
+      ...entry,
+      content: [
+        { type: 'text', text: textContent },
+        {
+          type: 'document',
+          source: {
+            type: 'base64',
+            media_type: attachment.mimeType,
+            data: attachment.base64,
+          },
+        },
+      ],
+    };
+    break;
+  }
+
+  return nextMessages;
+};
+
+const getTopicAttachmentForTutor = async ({ db, userId, topicId }) => {
+  if (!topicId || typeof topicId !== 'string') {
+    return null;
+  }
+
+  const asset = await db.get(
+    `SELECT drive_file_id, original_name, mime_type, size_bytes
+       FROM file_assets
+      WHERE user_id = ? AND topic_id = ?`,
+    [userId, topicId]
+  );
+
+  if (!asset?.drive_file_id) {
+    return null;
+  }
+
+  const drive = await getDriveClientForUser(userId);
+  const download = await drive.files.get(
+    { fileId: asset.drive_file_id, alt: 'media' },
+    { responseType: 'arraybuffer' }
+  );
+
+  const rawData = download?.data;
+  const buffer = Buffer.isBuffer(rawData) ? rawData : Buffer.from(rawData || []);
+  if (!buffer.length) {
+    return null;
+  }
+
+  return {
+    fileName: asset.original_name || 'attachment',
+    mimeType: asset.mime_type || 'application/octet-stream',
+    sizeBytes: Number(asset.size_bytes || buffer.length),
+    buffer,
+    base64: buffer.toString('base64'),
+  };
 };
 
 app.get('/api/app/health', (_req, res) => {
@@ -1032,7 +1154,7 @@ app.post('/api/app/auth/google', authRateLimiter, async (req, res) => {
 
 app.post('/api/app/auth/passkey/challenge', authRateLimiter, async (req, res) => {
   try {
-    const { type, userId: requestedUserId, userName } = req.body || {};
+    const { type, userName } = req.body || {};
     if (type !== 'registration' && type !== 'authentication') {
       return res.status(400).json({ error: 'type must be "registration" or "authentication"' });
     }
@@ -1048,16 +1170,12 @@ app.post('/api/app/auth/passkey/challenge', authRateLimiter, async (req, res) =>
         return res.status(400).json({ error: 'userName is required for registration' });
       }
 
-      const serverGeneratedUserId = crypto.randomUUID();
+      const registrationUserId = req.authUserId || crypto.randomUUID();
 
-      const existingCredentials = requestedUserId
-        ? await db.all(
-            `SELECT credential_id FROM passkey_credentials WHERE user_id = ?`,
-            [requestedUserId]
-          )
-        : [];
-
-      const registrationUserId = requestedUserId || serverGeneratedUserId;
+      const existingCredentials = await db.all(
+        `SELECT credential_id FROM passkey_credentials WHERE user_id = ?`,
+        [registrationUserId]
+      );
 
       const options = await generateRegistrationOptions({
         rpName: 'AntiForget',
@@ -1078,6 +1196,7 @@ app.post('/api/app/auth/passkey/challenge', authRateLimiter, async (req, res) =>
       return res.json({ challengeId, options, userId: registrationUserId });
     }
 
+    const requestedUserId = req.authUserId || null;
     const allCredentials = requestedUserId
       ? await db.all(`SELECT credential_id FROM passkey_credentials WHERE user_id = ?`, [requestedUserId])
       : [];
@@ -1359,6 +1478,18 @@ app.use('/api/app', (req, _res, next) => {
 });
 
 app.use('/api/app', (req, res, next) => {
+  if (!STATE_CHANGING_METHODS.has(req.method)) {
+    return next();
+  }
+
+  if (!isTrustedRequestOrigin(req)) {
+    return res.status(403).json({ error: 'Request origin is not allowed.' });
+  }
+
+  return next();
+});
+
+app.use('/api/app', (req, res, next) => {
   if (PUBLIC_API_PATHS.has(req.path)) {
     return next();
   }
@@ -1524,12 +1655,8 @@ app.get('/api/app/ai/credentials/status', async (req, res) => {
     await ensureUser(userId);
 
     const db = await getDb();
-    const rows = await db.all(`SELECT provider FROM api_credentials WHERE user_id = ?`, [userId]);
-    const providers = new Set(
-      rows
-        .map((row) => normalizeProvider(row.provider))
-        .filter((provider) => PROVIDERS.has(provider))
-    );
+    const { keyMap } = await getCredentialDecryptionSummary(db, userId);
+    const providers = new Set(Object.keys(keyMap));
 
     return res.json({
       providers: {
@@ -1791,15 +1918,12 @@ app.get('/api/app/settings/storage-provider', async (req, res) => {
 
     await ensureUser(userId);
     const db = await getDb();
-    const pref = await db.get(`SELECT file_storage_provider FROM user_preferences WHERE user_id = ?`, [userId]);
     const driveConnection = await db.get(`SELECT user_id FROM drive_connections WHERE user_id = ?`, [userId]);
-    const localStoragePath = await getConfiguredLocalStoragePath(db);
 
     return res.json({
-      provider: pref?.file_storage_provider || 'local',
+      provider: 'google-drive',
       driveConnected: Boolean(driveConnection),
       driveReady: hasGoogleDriveConfig(),
-      localStoragePath,
     });
   } catch (error) {
     console.error(error);
@@ -1807,153 +1931,12 @@ app.get('/api/app/settings/storage-provider', async (req, res) => {
   }
 });
 
-app.get('/api/app/settings/local-folder', async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
-
-    await ensureUser(userId);
-    const db = await getDb();
-    const localStoragePath = await getConfiguredLocalStoragePath(db);
-    return res.json({ localStoragePath });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: 'Failed to read local folder setting' });
-  }
-});
-
-app.get('/api/app/settings/local-folder/browse', async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
-
-    await ensureUser(userId);
-
-    const requestedPath = typeof req.query.path === 'string' ? req.query.path : '';
-    const currentPath = toSafeBrowsePath(requestedPath);
-
-    if (!fs.existsSync(currentPath)) {
-      return res.status(404).json({ error: 'Folder not found' });
-    }
-
-    const stat = fs.statSync(currentPath);
-    if (!stat.isDirectory()) {
-      return res.status(400).json({ error: 'Path is not a directory' });
-    }
-
-    const entries = fs
-      .readdirSync(currentPath, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => {
-        const fullPath = path.join(currentPath, entry.name);
-        return {
-          name: entry.name,
-          path: fullPath,
-        };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    const parentPath = currentPath === browseRoot
-      ? null
-      : path.dirname(currentPath);
-
-    return res.json({
-      rootPath: browseRoot,
-      currentPath,
-      parentPath: parentPath && isPathWithinRoot(parentPath) ? parentPath : null,
-      directories: entries,
-    });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: 'Failed to browse folders' });
-  }
-});
-
-app.post('/api/app/settings/local-folder/native-picker', async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
-
-    await ensureUser(userId);
-
-    const db = await getDb();
-    const currentPath = await getConfiguredLocalStoragePath(db);
-
-    let pickedPath = '';
-    try {
-      pickedPath = await pickNativeFolderPath(currentPath);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to open native folder picker';
-      if (/User canceled/i.test(msg)) {
-        return res.status(400).json({ error: 'Folder selection was cancelled.' });
-      }
-      throw error;
-    }
-
-    if (!pickedPath) {
-      return res.status(400).json({ error: 'No folder selected.' });
-    }
-
-    const resolvedPath = path.resolve(pickedPath);
-    fs.mkdirSync(resolvedPath, { recursive: true });
-    await persistLocalStoragePath(db, resolvedPath);
-
-    return res.json({ ok: true, localStoragePath: resolvedPath });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: 'Failed to pick local folder using native dialog.' });
-  }
-});
-
-app.put('/api/app/settings/local-folder', async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const { localStoragePath } = req.body || {};
-    if (!userId) {
-      return res.status(401).json({ error: 'Authentication required.' });
-    }
-    if (!localStoragePath || typeof localStoragePath !== 'string') {
-      return res.status(400).json({ error: 'localStoragePath is required' });
-    }
-
-    await ensureUser(userId);
-
-    const resolvedPath = path.isAbsolute(localStoragePath)
-      ? path.resolve(localStoragePath)
-      : path.resolve(process.cwd(), localStoragePath);
-
-    if (!isPathWithinRoot(resolvedPath)) {
-      return res.status(400).json({ error: 'Storage path must be within your home directory.' });
-    }
-
-    fs.mkdirSync(resolvedPath, { recursive: true });
-
-    const db = await getDb();
-    await persistLocalStoragePath(db, resolvedPath);
-
-    return res.json({ ok: true, localStoragePath: resolvedPath });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: 'Failed to update local folder setting' });
-  }
-});
-
 app.put('/api/app/settings/storage-provider', async (req, res) => {
   try {
     const userId = getUserId(req);
-    const { provider: rawProvider } = req.body || {};
-    const provider = normalizeProvider(rawProvider);
+    const provider = 'google-drive';
     if (!userId) {
       return res.status(401).json({ error: 'Authentication required.' });
-    }
-    if (!FILE_PROVIDERS.has(provider)) {
-      return res.status(400).json({ error: 'Invalid provider' });
     }
 
     await ensureUser(userId);
@@ -2131,20 +2114,16 @@ const getDriveClientForUser = async (userId) => {
 
 const ALLOWED_UPLOAD_MIMES = new Set([
   'application/pdf',
-  'image/png',
-  'image/jpeg',
-  'image/gif',
-  'image/webp',
-  'text/plain',
-  'text/markdown',
+  'application/msword',
+  DOCX_MIME,
 ]);
+
+const ALLOWED_UPLOAD_EXTENSIONS = new Set(['.pdf', '.doc', '.docx']);
 
 const MAGIC_BYTES = [
   { mime: 'application/pdf', bytes: [0x25, 0x50, 0x44, 0x46] },          // %PDF
-  { mime: 'image/png',       bytes: [0x89, 0x50, 0x4e, 0x47] },          // .PNG
-  { mime: 'image/jpeg',      bytes: [0xff, 0xd8, 0xff] },                // JPEG SOI
-  { mime: 'image/gif',       bytes: [0x47, 0x49, 0x46, 0x38] },          // GIF8
-  { mime: 'image/webp',      bytes: [0x52, 0x49, 0x46, 0x46] },          // RIFF (WebP)
+  { mime: 'application/msword', bytes: [0xd0, 0xcf, 0x11, 0xe0] },       // OLE2
+  { mime: DOCX_MIME, bytes: [0x50, 0x4b, 0x03, 0x04] },                  // ZIP header (.docx container)
 ];
 
 const detectMimeFromMagic = (buffer) => {
@@ -2156,24 +2135,101 @@ const detectMimeFromMagic = (buffer) => {
   return null;
 };
 
-const isUploadMimeAllowed = (claimedMime, buffer) => {
+const hasAllowedUploadExtension = (originalName) => {
+  const extension = path.extname(String(originalName || '')).toLowerCase();
+  return ALLOWED_UPLOAD_EXTENSIONS.has(extension);
+};
+
+const isUploadMimeAllowed = (claimedMime, buffer, originalName) => {
   if (!ALLOWED_UPLOAD_MIMES.has(claimedMime)) {
     return false;
   }
-  // Text-based types (plain text, markdown) can't be validated via magic bytes.
-  if (claimedMime.startsWith('text/')) {
-    return true;
+  if (!hasAllowedUploadExtension(originalName)) {
+    return false;
   }
+
   const detected = detectMimeFromMagic(buffer);
   if (!detected) {
     return false;
   }
-  // For WebP the RIFF magic is shared; accept if claimed type is webp.
-  if (claimedMime === 'image/webp' && detected === 'image/webp') {
-    return true;
+
+  // .docx shares ZIP header; require docx extension to avoid accepting generic ZIP files.
+  if (claimedMime === DOCX_MIME) {
+    return detected === DOCX_MIME && /\.docx$/i.test(String(originalName || ''));
   }
+
   return detected === claimedMime;
 };
+
+const DRIVE_APP_FOLDER_NAME = 'AntiForget Uploads';
+
+const ensureDriveAppFolder = async (drive) => {
+  const existing = await drive.files.list({
+    q: `mimeType = 'application/vnd.google-apps.folder' and name = '${DRIVE_APP_FOLDER_NAME.replace(/'/g, "\\'")}' and trashed = false and 'root' in parents`,
+    spaces: 'drive',
+    pageSize: 1,
+    fields: 'files(id, name)',
+  });
+
+  const existingFolderId = existing.data.files?.[0]?.id;
+  if (existingFolderId) {
+    return existingFolderId;
+  }
+
+  const created = await drive.files.create({
+    requestBody: {
+      name: DRIVE_APP_FOLDER_NAME,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: ['root'],
+    },
+    fields: 'id',
+  });
+
+  const folderId = created.data.id;
+  if (!folderId) {
+    throw new Error('Failed to create Google Drive upload folder.');
+  }
+
+  return folderId;
+};
+
+app.get('/api/app/drive/debug', async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+    if (!hasGoogleDriveConfig()) {
+      return res.status(400).json({ error: 'Google Drive OAuth is not configured on the server.' });
+    }
+
+    await ensureUser(userId);
+    const drive = await getDriveClientForUser(userId);
+    const folderId = await ensureDriveAppFolder(drive);
+
+    const [aboutRes, filesRes] = await Promise.all([
+      drive.about.get({ fields: 'user(emailAddress,displayName)' }),
+      drive.files.list({
+        q: `'${folderId}' in parents and trashed = false`,
+        orderBy: 'createdTime desc',
+        pageSize: 10,
+        fields: 'files(id,name,mimeType,createdTime,webViewLink)',
+      }),
+    ]);
+
+    return res.json({
+      ok: true,
+      connectedDriveUser: aboutRes.data.user || null,
+      appFolderId: folderId,
+      appFolderLink: `https://drive.google.com/drive/folders/${folderId}`,
+      recentFiles: filesRes.data.files || [],
+    });
+  } catch (error) {
+    console.error(error);
+    const message = error instanceof Error ? error.message : 'Failed to load Google Drive debug status';
+    return res.status(500).json({ error: message });
+  }
+});
 
 app.post('/api/app/files/upload', upload.single('file'), async (req, res) => {
   try {
@@ -2185,43 +2241,56 @@ app.post('/api/app/files/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'userId, topicId and file are required' });
     }
 
-    if (!isUploadMimeAllowed(file.mimetype, file.buffer)) {
+    if (file.size > UPLOAD_MAX_FILE_SIZE_BYTES) {
+      return res.status(400).json({ error: 'File exceeds 2MB limit.' });
+    }
+
+    if (!isUploadMimeAllowed(file.mimetype, file.buffer, file.originalname)) {
       return res.status(400).json({
-        error: `File type "${file.mimetype}" is not allowed. Accepted types: PDF, PNG, JPEG, GIF, WebP, plain text, markdown.`,
+        error: `File type "${file.mimetype}" is not allowed. Accepted types: PDF, DOC, DOCX (max 2MB).`,
       });
     }
 
     await ensureUser(userId);
     const db = await getDb();
-    const pref = await db.get(`SELECT file_storage_provider FROM user_preferences WHERE user_id = ?`, [userId]);
-    const provider = pref?.file_storage_provider || 'local';
-
-    let storagePath = null;
+    const provider = 'google-drive';
     let driveFileId = null;
 
-    if (provider === 'google-drive') {
-      if (!hasGoogleDriveConfig()) {
-        return res.status(400).json({ error: 'Google Drive is not configured on server.' });
-      }
+    if (!hasGoogleDriveConfig()) {
+      return res.status(400).json({ error: 'Google Drive is not configured on server.' });
+    }
 
-      const drive = await getDriveClientForUser(userId);
-      const uploadResponse = await drive.files.create({
-        requestBody: { name: file.originalname },
-        media: {
-          mimeType: file.mimetype,
-          body: Buffer.from(file.buffer),
-        },
-        fields: 'id',
-      });
-      driveFileId = uploadResponse.data.id || null;
-    } else {
-      const localStoragePath = await getConfiguredLocalStoragePath(db);
-      const safeName = `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-      const userDir = path.join(localStoragePath, userId);
-      fs.mkdirSync(userDir, { recursive: true });
-      const absolutePath = path.join(userDir, safeName);
-      fs.writeFileSync(absolutePath, file.buffer);
-      storagePath = absolutePath;
+    const drive = await getDriveClientForUser(userId);
+    const existingAsset = await db.get(
+      `SELECT drive_file_id FROM file_assets WHERE user_id = ? AND topic_id = ?`,
+      [userId, topicId]
+    );
+    const parentFolderId = await ensureDriveAppFolder(drive);
+
+    if (existingAsset?.drive_file_id) {
+      try {
+        await drive.files.delete({ fileId: existingAsset.drive_file_id });
+      } catch (deleteErr) {
+        console.warn('Failed to delete previous Drive file for topic before replacing', deleteErr);
+      }
+    }
+
+    const uploadResponse = await drive.files.create({
+      requestBody: {
+        name: file.originalname,
+        parents: [parentFolderId],
+      },
+      media: {
+        mimeType: file.mimetype,
+        body: Readable.from(file.buffer),
+      },
+      fields: 'id, webViewLink',
+    });
+    driveFileId = uploadResponse.data.id || null;
+    const driveFileLink = uploadResponse.data.webViewLink || null;
+
+    if (!driveFileId) {
+      throw new Error('Google Drive upload did not return a file id.');
     }
 
     await db.run(
@@ -2235,15 +2304,23 @@ app.post('/api/app/files/upload', upload.single('file'), async (req, res) => {
                      mime_type = excluded.mime_type,
                      size_bytes = excluded.size_bytes,
                      updated_at = CURRENT_TIMESTAMP`,
-      [userId, topicId, provider, storagePath, driveFileId, file.originalname, file.mimetype, file.size]
+      [userId, topicId, provider, null, driveFileId, file.originalname, file.mimetype, file.size]
     );
 
     await db.run(`UPDATE topics SET has_pdf_blob = 1, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND id = ?`, [userId, topicId]);
 
-    return res.json({ ok: true, provider });
+    return res.json({
+      ok: true,
+      provider,
+      driveFileId,
+      driveFileLink,
+      driveFolderId: parentFolderId,
+      driveFolderLink: `https://drive.google.com/drive/folders/${parentFolderId}`,
+    });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ error: 'Failed to upload file' });
+    const message = error instanceof Error ? error.message : 'Failed to upload file';
+    return res.status(500).json({ error: message });
   }
 });
 
@@ -2261,12 +2338,6 @@ app.delete('/api/app/files/:topicId', async (req, res) => {
       `SELECT provider, storage_path, drive_file_id FROM file_assets WHERE user_id = ? AND topic_id = ?`,
       [userId, topicId]
     );
-
-    if (asset?.provider === 'local' && asset.storage_path) {
-      if (fs.existsSync(asset.storage_path)) {
-        fs.unlinkSync(asset.storage_path);
-      }
-    }
 
     if (asset?.provider === 'google-drive' && asset.drive_file_id) {
       const drive = await getDriveClientForUser(userId);
@@ -2297,6 +2368,12 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
     const credentialMap = await getAvailableCredentialMap(db, userId);
     const availableProviders = Object.keys(credentialMap);
     if (availableProviders.length === 0) {
+      const { totalStoredProviders } = await getCredentialDecryptionSummary(db, userId);
+      if (totalStoredProviders > 0) {
+        return res.status(400).json({
+          error: 'Stored API keys could not be decrypted. This usually means APP_ENCRYPTION_KEY changed. Re-save your provider keys in Settings.',
+        });
+      }
       return res.status(400).json({ error: 'No API key is configured. Add at least one provider key in Settings.' });
     }
 
@@ -2305,6 +2382,8 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
       ? mode
       : (isFirstTurn ? 'questions' : 'grading');
     const shouldInjectTopicContext = resolvedMode === 'questions' && isFirstTurn;
+    let tutorAttachment = null;
+    let attachmentPromptContext = 'Attached file context: none';
     let finalPrompt = newPrompt;
     if (shouldInjectTopicContext) {
       const topicName = typeof topicContext?.topicName === 'string' && topicContext.topicName.trim()
@@ -2329,10 +2408,37 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
         ? topicContext.missedQuestionHistory.filter((item) => typeof item === 'string' && item.trim()).slice(0, 5)
         : [];
 
+      try {
+        tutorAttachment = await getTopicAttachmentForTutor({
+          db,
+          userId,
+          topicId: topicContext?.topicId,
+        });
+
+        if (tutorAttachment) {
+          const extracted = await extractAttachmentText({
+            mimeType: tutorAttachment.mimeType,
+            buffer: tutorAttachment.buffer,
+          });
+          const snippet = truncateForPrompt(extracted);
+          attachmentPromptContext = snippet
+            ? [
+                `Attached file: ${tutorAttachment.fileName}`,
+                `Type: ${tutorAttachment.mimeType}`,
+                'Extracted content:',
+                snippet,
+              ].join('\n')
+            : `Attached file: ${tutorAttachment.fileName} (${tutorAttachment.mimeType}, ${tutorAttachment.sizeBytes} bytes). No extractable text found.`;
+        }
+      } catch (attachmentErr) {
+        console.warn('Unable to load attachment context for tutor prompt:', attachmentErr);
+      }
+
       finalPrompt = [
         `Topic: ${topicName}`,
         `Linked topics: ${linkedTopics.length > 0 ? linkedTopics.join(', ') : 'None'}`,
         `Topic summary: ${summaryContent}`,
+        attachmentPromptContext,
         `Student level: ${studentLevel}`,
         `Student major: ${studentMajor}`,
         `Student focus topic: ${studentFocus}`,
@@ -2419,10 +2525,16 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
       }
 
       const tokenLimit = candidate.reasoning ? 4096 : 1024;
+      const nativeAttachment = shouldInjectTopicContext && providerSupportsNativeAttachment(candidate.provider, tutorAttachment);
+      const candidateMessages = nativeAttachment
+        ? appendNativeAttachmentToClaudeMessages(messages, tutorAttachment)
+        : messages;
+
+      currentAttempt.attachmentMode = nativeAttachment ? 'native-file' : (tutorAttachment ? 'text-fallback' : 'none');
       const payload = buildProviderPayload({
         provider: candidate.provider,
         model: candidate.model,
-        messages,
+        messages: candidateMessages,
         temperature: resolvedMode === 'questions' ? 0.2 : resolvedMode === 'chat' ? 0.3 : 0,
         maxTokens: tokenLimit,
         reasoning: Boolean(candidate.reasoning),
@@ -2521,6 +2633,13 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
     console.error(error);
     return res.status(500).json({ error: 'Tutor request failed' });
   }
+});
+
+app.use((error, _req, res, next) => {
+  if (error && error.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({ error: 'File exceeds 2MB limit. Please upload PDF, DOC, or DOCX up to 2MB.' });
+  }
+  return next(error);
 });
 
 if (fs.existsSync(clientDistDir)) {

@@ -6,7 +6,7 @@ AntiForget is a web app for active learning with three core workflows:
 - Topic Map: connect topics visually
 - Review Coach: run timed AI-assisted recall sessions with spaced repetition
 
-This version persists user data through a backend API with SQLite tables, and supports file storage in either a local server folder or Google Drive.
+This version persists user data through a backend API with PostgreSQL tables, and supports file storage in either a local server folder or Google Drive.
 
 ## Tech Stack
 
@@ -14,7 +14,7 @@ This version persists user data through a backend API with SQLite tables, and su
 - Vite 7
 - Tailwind CSS
 - Express API server
-- SQLite database
+- PostgreSQL database
 - Google OAuth (via `@react-oauth/google`)
 - Puter.js (frontend AI access)
 - Passkey sign-in (WebAuthn)
@@ -41,13 +41,26 @@ Set Google OAuth + backend settings in `.env`:
 ```env
 VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
 APP_SERVER_PORT=8787
-APP_DB_PATH=./server_data/smartrevision.db
-LOCAL_FILE_STORAGE_PATH=./server_data/uploads
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/antiforget
 FRONTEND_BASE_URL=http://localhost:5173
 APP_ENCRYPTION_KEY=replace-with-a-long-random-secret
+APP_JWT_SECRET=replace-with-a-different-long-random-secret
 ```
 
-Optional Google Drive storage support:
+If you have existing SQLite data and want to keep it, add:
+
+```env
+SQLITE_PATH=./server_data/smartrevision.db
+```
+
+Then run:
+
+```bash
+npm run db:migrate:sqlite-to-postgres:truncate
+npm run db:validate:sqlite-to-postgres
+```
+
+Google Drive storage support (required for uploads):
 
 ```env
 GOOGLE_DRIVE_CLIENT_ID=...
@@ -95,9 +108,16 @@ This repo can run as a single Cloud Run container.
 
 1. Keep Google login optional. If you do not set `VITE_GOOGLE_CLIENT_ID` at build time, the app falls back to passkey sign-in only.
 2. Provide runtime secrets only through Cloud Run environment variables or Secret Manager. Do not commit a real `.env` file.
-3. The current backend uses SQLite and local file storage. That is fine for a demo or single-instance deployment, but Cloud Run filesystem storage is ephemeral. For durable data, move the database and file uploads to managed storage before production use.
+3. The backend requires `DATABASE_URL` and is designed for managed PostgreSQL (Supabase recommended for this project).
 4. Build the image from the repo root `Dockerfile` and deploy it on Cloud Run with port `8080`.
-5. Set `APP_ENCRYPTION_KEY`, `FRONTEND_BASE_URL`, and any optional Google Drive or AI provider keys in the Cloud Run service configuration.
+5. Set `DATABASE_URL`, `APP_ENCRYPTION_KEY`, `APP_JWT_SECRET`, `FRONTEND_BASE_URL`, and any optional Google Drive or AI provider keys in the Cloud Run service configuration.
+
+Recommended deployment setup:
+
+1. Create a Supabase project and copy its PostgreSQL connection string.
+2. Store the connection string as a secret (for example, in Google Secret Manager).
+3. Inject that secret into Cloud Run as `DATABASE_URL`.
+4. Set `FRONTEND_BASE_URL=https://antiforget.app` for production.
 
 If you want Google sign-in in production, create a separate Google OAuth client for your deployed domain and pass `VITE_GOOGLE_CLIENT_ID` at image build time.
 
@@ -159,7 +179,7 @@ Client helper functions are available in `src/utils/puter.ts`:
 
 ## Data Tables
 
-Database file: `server_data/smartrevision.db`
+Database engine: PostgreSQL (via `DATABASE_URL`)
 
 Main tables:
 
@@ -172,12 +192,9 @@ Main tables:
 - `file_assets`
 - `drive_connections`
 
-## File Storage Providers
+## File Storage Provider
 
-From Settings, users can choose where source files are saved:
-
-- `local`: files go to `LOCAL_FILE_STORAGE_PATH` (default `server_data/uploads`)
-- `google-drive`: files upload via Google Drive API after OAuth connect
+Source files are stored in `google-drive` only (via Google Drive API after OAuth connect).
 
 ## Build
 

@@ -51,6 +51,11 @@ const PROVIDER_DEFAULTS: Record<AiProvider, { remoteUrl: string; devProxyUrl: st
         devProxyUrl: '/api/claude/messages',
         model: 'claude-3-7-sonnet-latest',
     },
+    puter: {
+        remoteUrl: '',
+        devProxyUrl: '',
+        model: '',
+    },
 };
 
 const getDefaultProviderFromEnv = (): AiProvider => {
@@ -73,6 +78,7 @@ export interface TutorTopicContext {
     topicName: string;
     linkedTopicNames: string[];
     summaryContent: string;
+    hasAttachedFile?: boolean;
     studentLevel: string;
     studentMajor: string;
     studentFocusTopic: string;
@@ -227,7 +233,8 @@ export const generateTutorResponse = async (
 
     try {
         const puterPrimary = await getPuterPrimaryModel();
-        if (puterPrimary && isPuterAvailable()) {
+        const shouldBypassPuter = resolvedMode === 'questions' && Boolean(topicContext?.hasAttachedFile);
+        if (puterPrimary && isPuterAvailable() && !shouldBypassPuter) {
             const startedAt = Date.now();
             const prompt = buildTutorPrompt(history, newPrompt, topicContext, resolvedMode);
             const text = await puterChat(prompt, { model: puterPrimary.model });

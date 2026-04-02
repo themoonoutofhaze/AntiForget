@@ -1,17 +1,3 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const currentFile = fileURLToPath(import.meta.url);
-const serverSrcDir = path.dirname(currentFile);
-const projectRootDir = path.resolve(serverSrcDir, '..', '..');
-const resolveAppPath = (value, fallback) => {
-  const picked = value || fallback;
-  if (path.isAbsolute(picked)) {
-    return picked;
-  }
-  return path.resolve(projectRootDir, picked);
-};
-
 if (!process.env.APP_ENCRYPTION_KEY || !process.env.APP_ENCRYPTION_KEY.trim()) {
   throw new Error(
     'APP_ENCRYPTION_KEY environment variable is required but not set. ' +
@@ -27,10 +13,16 @@ if (!process.env.APP_JWT_SECRET || !process.env.APP_JWT_SECRET.trim()) {
   );
 }
 
+if (!process.env.DATABASE_URL || !process.env.DATABASE_URL.trim()) {
+  throw new Error(
+    'DATABASE_URL environment variable is required but not set. ' +
+    'Use a PostgreSQL connection string, e.g. postgresql://user:pass@host:5432/dbname'
+  );
+}
+
 export const config = {
   port: Number(process.env.PORT || process.env.APP_SERVER_PORT || 8787),
-  dbPath: resolveAppPath(process.env.APP_DB_PATH, './server_data/smartrevision.db'),
-  uploadsRoot: resolveAppPath(process.env.LOCAL_FILE_STORAGE_PATH, './server_data/uploads'),
+  databaseUrl: process.env.DATABASE_URL.trim(),
   frontendBaseUrl: process.env.FRONTEND_BASE_URL || 'http://localhost:5173',
   encryptionKey: process.env.APP_ENCRYPTION_KEY.trim(),
   jwtSecret: process.env.APP_JWT_SECRET.trim(),
