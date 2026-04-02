@@ -102,8 +102,6 @@ const nodeTypes: NodeTypes = { custom: CustomNode };
 export const KnowledgeGraph: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
     const [nodes, setNodes] = useState<FlowNode[]>([]);
     const [edges, setEdges] = useState<FlowEdge[]>([]);
-    const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-    const [tagDraft, setTagDraft] = useState('');
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -162,35 +160,6 @@ export const KnowledgeGraph: React.FC<{ embedded?: boolean }> = ({ embedded = fa
         );
         await updateStorage({ nodes: updated });
     }, []);
-
-    const onNodeClick = useCallback(async (_event: React.MouseEvent, node: FlowNode) => {
-        const storage = await getStorage();
-        const selected = storage.nodes.find((n) => n.id === node.id);
-        setSelectedNodeId(node.id);
-        setTagDraft((selected?.tags || []).join(', '));
-    }, []);
-
-    const saveTags = useCallback(async () => {
-        if (!selectedNodeId) return;
-        const tags = tagDraft
-            .split(',')
-            .map((tag) => tag.trim())
-            .filter(Boolean);
-
-        const storage = await getStorage();
-        const updatedStorageNodes = storage.nodes.map((n) =>
-            n.id === selectedNodeId ? { ...n, tags } : n
-        );
-        await updateStorage({ nodes: updatedStorageNodes });
-
-        setNodes((prev) =>
-            prev.map((n) =>
-                n.id === selectedNodeId
-                    ? { ...n, data: { ...(n.data as CustomNodeData), tags } }
-                    : n
-            )
-        );
-    }, [selectedNodeId, tagDraft]);
 
     if (loading) {
         return (
@@ -275,7 +244,6 @@ export const KnowledgeGraph: React.FC<{ embedded?: boolean }> = ({ embedded = fa
                         onNodesChange={onNodesChange}
                         onEdgesChange={onEdgesChange}
                         onConnect={onConnect}
-                        onNodeClick={onNodeClick}
                         onNodeDragStop={onNodeDragStop}
                         nodeTypes={nodeTypes}
                         fitView
@@ -291,27 +259,6 @@ export const KnowledgeGraph: React.FC<{ embedded?: boolean }> = ({ embedded = fa
                     </ReactFlow>
                 )}
             </div>
-
-            {selectedNodeId && (
-                <div className="glass-card p-4 flex flex-col gap-3">
-                    <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-                        Topic Tags
-                    </p>
-                    <input
-                        id="graph-topic-tags-input"
-                        type="text"
-                        value={tagDraft}
-                        onChange={(e) => setTagDraft(e.target.value)}
-                        className="input-field"
-                        placeholder="Add tags separated by commas"
-                    />
-                    <div className="flex justify-end">
-                        <button id="save-topic-tags-btn" onClick={saveTags} className="btn-secondary">
-                            Save Tags
-                        </button>
-                    </div>
-                </div>
-            )}
 
             <p className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>
                 Drag from a node handle to another to create a connection.
