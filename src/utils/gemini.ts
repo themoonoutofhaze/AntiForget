@@ -1,4 +1,4 @@
-import type { AiProvider } from './storage';
+import { getStorage, type AiProvider } from './storage';
 import { apiDelete, apiGet, apiPost, apiPut } from './api/client';
 import { isPuterAvailable, puterChat } from './puter';
 
@@ -19,12 +19,12 @@ const PROVIDER_DEFAULTS: Record<AiProvider, { remoteUrl: string; devProxyUrl: st
     openai: {
         remoteUrl: 'https://api.openai.com/v1/chat/completions',
         devProxyUrl: '/api/openai/chat/completions',
-        model: 'gpt-5.4-nano',
+        model: 'gpt-oss-120b',
     },
     groq: {
         remoteUrl: 'https://api.groq.com/openai/v1/chat/completions',
         devProxyUrl: '/api/groq/chat/completions',
-        model: 'llama3-8b-8192',
+        model: 'openai/gpt-oss-120b',
     },
     mistral: {
         remoteUrl: 'https://api.mistral.ai/v1/chat/completions',
@@ -34,7 +34,7 @@ const PROVIDER_DEFAULTS: Record<AiProvider, { remoteUrl: string; devProxyUrl: st
     nvidia: {
         remoteUrl: 'https://integrate.api.nvidia.com/v1/chat/completions',
         devProxyUrl: '/api/nvidia/chat/completions',
-        model: 'meta/llama-3.1-405b-instruct',
+        model: 'nemotron-3-super-120b-a12b',
     },
     openrouter: {
         remoteUrl: 'https://openrouter.ai/api/v1/chat/completions',
@@ -49,12 +49,12 @@ const PROVIDER_DEFAULTS: Record<AiProvider, { remoteUrl: string; devProxyUrl: st
     claude: {
         remoteUrl: 'https://api.anthropic.com/v1/messages',
         devProxyUrl: '/api/claude/messages',
-        model: 'claude-3-7-sonnet-latest',
+        model: 'claude-3-5-haiku-latest',
     },
     puter: {
         remoteUrl: '',
         devProxyUrl: '',
-        model: '',
+        model: 'gpt-oss-120b',
     },
 };
 
@@ -82,6 +82,7 @@ export interface TutorTopicContext {
     studentLevel: string;
     studentMajor: string;
     studentFocusTopic: string;
+    aiLanguage?: string;
     missedQuestionHistory: string[];
 }
 
@@ -140,6 +141,7 @@ const buildTutorPrompt = (
     newPrompt: string,
     topicContext: TutorTopicContext | null,
     mode: TutorRequestMode,
+    aiLanguage: string,
 ) => {
     const isFirstTurn = !history || history.length === 0;
     let finalPrompt = newPrompt;
@@ -193,11 +195,15 @@ const buildTutorPrompt = (
         ].join('\n');
     }
 
-    const systemPrompt = mode === 'questions'
-        ? generationSystemPrompt
-        : mode === 'grading'
-            ? gradingSystemPrompt
-            : chatSystemPrompt;
+    const languageInstruction = `- Generate all output in ${aiLanguage}.`;
+    const systemPrompt = [
+        mode === 'questions'
+            ? generationSystemPrompt
+            : mode === 'grading'
+                ? gradingSystemPrompt
+                : chatSystemPrompt,
+        languageInstruction,
+    ].join('\n');
     const serializedHistory = (history || [])
         .slice(-6)
         .map((entry) => {
@@ -230,13 +236,25 @@ export const generateTutorResponse = async (
     options?: { signal?: AbortSignal; mode?: TutorRequestMode }
 ) => {
     const resolvedMode: TutorRequestMode = options?.mode || ((!history || history.length === 0) ? 'questions' : 'grading');
+    let aiLanguage = (topicContext?.aiLanguage || '').trim();
+    if (!aiLanguage) {
+        try {
+            const storage = await getStorage();
+            aiLanguage = (storage.aiLanguage || '').trim();
+        } catch {
+            aiLanguage = '';
+        }
+    }
+    if (!aiLanguage) {
+        aiLanguage = 'English';
+    }
 
     try {
         const puterPrimary = await getPuterPrimaryModel();
         const shouldBypassPuter = resolvedMode === 'questions' && Boolean(topicContext?.hasAttachedFile);
         if (puterPrimary && isPuterAvailable() && !shouldBypassPuter) {
             const startedAt = Date.now();
-            const prompt = buildTutorPrompt(history, newPrompt, topicContext, resolvedMode);
+            const prompt = buildTutorPrompt(history, newPrompt, topicContext, resolvedMode, aiLanguage);
             const text = await puterChat(prompt, { model: puterPrimary.model });
             return {
                 text: text || 'No response generated.',
@@ -262,6 +280,7 @@ export const generateTutorResponse = async (
         newPrompt,
         topicContext,
         mode: resolvedMode,
+        aiLanguage,
     }, {
         signal: options?.signal,
     });

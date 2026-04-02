@@ -41,6 +41,7 @@ export interface SynapseStorage {
     studentEducationLevel: string;
     studentMajor: string;
     studentFocusTopic: string;
+    aiLanguage: string;
     missedQuestionHistoryByTopic: Record<string, string[]>;
     aiProvider: AiProvider;
     aiModelOverrides: Partial<Record<AiProvider, string>>;
@@ -65,6 +66,7 @@ const DEFAULT_STATE: SynapseStorage = {
     studentEducationLevel: 'high school',
     studentMajor: '',
     studentFocusTopic: '',
+    aiLanguage: 'English',
     missedQuestionHistoryByTopic: {},
     aiProvider: 'groq',
     aiModelOverrides: {},

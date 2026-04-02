@@ -262,6 +262,7 @@ const ensureSchema = async (db) => {
       student_education_level TEXT NOT NULL DEFAULT 'high school',
       student_major TEXT NOT NULL DEFAULT '',
       student_focus_topic TEXT NOT NULL DEFAULT '',
+      ai_language TEXT NOT NULL DEFAULT 'English',
       missed_questions_json TEXT NOT NULL DEFAULT '{}',
       ai_provider TEXT NOT NULL DEFAULT 'groq',
       ai_model_overrides_json TEXT NOT NULL DEFAULT '{}',
@@ -377,6 +378,7 @@ const ensureSchema = async (db) => {
     ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS daily_revision_minutes_limit INTEGER NOT NULL DEFAULT 60;
     ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS student_education_level TEXT NOT NULL DEFAULT 'high school';
     ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS student_focus_topic TEXT NOT NULL DEFAULT '';
+    ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS ai_language TEXT NOT NULL DEFAULT 'English';
     ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS missed_questions_json TEXT NOT NULL DEFAULT '{}';
     ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS student_major TEXT NOT NULL DEFAULT '';
     ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS ai_model_priority_json TEXT NOT NULL DEFAULT '[]';

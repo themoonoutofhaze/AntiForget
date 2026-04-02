@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { KeyRound, Moon, Save, Sun, Palette, CheckCircle2, HardDrive, Cloud, Clock3, GraduationCap, Bot, GripVertical, Plus, Trash2, ChevronDown, Loader2 } from 'lucide-react';
+import { KeyRound, Moon, Save, Sun, Palette, CheckCircle2, HardDrive, Cloud, Clock3, GraduationCap, Bot, GripVertical, Plus, Trash2, ChevronDown, Loader2, Languages } from 'lucide-react';
 import type { IconType } from 'react-icons';
 import * as SiIcons from 'react-icons/si';
 import { getStorage, updateStorage, type AiProvider } from '../../utils/storage';
@@ -125,16 +125,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
     const [studentEducationLevel, setStudentEducationLevel] = useState('high school');
     const [studentMajor, setStudentMajor] = useState('');
     const [studentFocusTopic, setStudentFocusTopic] = useState('');
+    const [aiLanguage, setAiLanguage] = useState('English');
     const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
     const [providerModels, setProviderModels] = useState<Record<AiProvider, string>>({
-        openai: 'gpt-5.4-nano',
+        openai: 'gpt-oss-120b',
         groq: 'openai/gpt-oss-120b',
         mistral: 'mistral-small-latest',
-        nvidia: 'meta/llama-3.1-405b-instruct',
+        nvidia: 'nemotron-3-super-120b-a12b',
         openrouter: 'xiaomi/mimo-v2-flash',
         gemini: 'gemini-2.5-flash',
-        claude: 'claude-3-7-sonnet-latest',
-        puter: 'gpt-4o-mini',
+        claude: 'claude-3-5-haiku-latest',
+        puter: 'gpt-oss-120b',
     });
     const [apiTestState, setApiTestState] = useState<Record<AiProvider, 'idle' | 'testing' | 'success' | 'error'>>({
         openai: 'idle',
@@ -292,15 +293,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
             setStudentEducationLevel((storage.studentEducationLevel || 'high school').trim() || 'high school');
             setStudentMajor(storage.studentMajor || '');
             setStudentFocusTopic(storage.studentFocusTopic || '');
+            setAiLanguage((storage.aiLanguage || 'English').trim() || 'English');
             setProviderModels({
-                openai: storage.aiModelOverrides.openai || 'gpt-5.4-nano',
+                openai: storage.aiModelOverrides.openai || 'gpt-oss-120b',
                 groq: storage.aiModelOverrides.groq || 'openai/gpt-oss-120b',
                 mistral: storage.aiModelOverrides.mistral || 'mistral-small-latest',
-                nvidia: storage.aiModelOverrides.nvidia || 'meta/llama-3.1-405b-instruct',
+                nvidia: storage.aiModelOverrides.nvidia || 'nemotron-3-super-120b-a12b',
                 openrouter: storage.aiModelOverrides.openrouter || 'xiaomi/mimo-v2-flash',
                 gemini: storage.aiModelOverrides.gemini || 'gemini-2.5-flash',
-                claude: storage.aiModelOverrides.claude || 'claude-3-7-sonnet-latest',
-                puter: 'gpt-4o-mini',
+                claude: storage.aiModelOverrides.claude || 'claude-3-5-haiku-latest',
+                puter: 'gpt-oss-120b',
             });
 
             try {
@@ -396,6 +398,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
         setSaveState('saving');
         try {
             const saveOps: Promise<unknown>[] = [];
+            
+            // If the user is saving keys for the first time or updating them,
+            // we should also ensure the default model for that provider is added
+            // if they don't have any models for it yet.
+            const providersToCheck = new Set<AiProvider>();
+
             const priorityToSave = reconcilePriorityOrder(latestPriorityIdsRef.current, priorityModels);
 
             const nextGroqKey = groqKeyInput.trim();
@@ -408,30 +416,58 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
 
             if (nextOpenaiKey) {
                 saveOps.push(saveApiCredential('openai', nextOpenaiKey));
+                providersToCheck.add('openai');
             }
             if (nextGroqKey) {
                 saveOps.push(saveApiCredential('groq', nextGroqKey));
+                providersToCheck.add('groq');
             }
             if (nextMistralKey) {
                 saveOps.push(saveApiCredential('mistral', nextMistralKey));
+                providersToCheck.add('mistral');
             }
             if (nextNvidiaKey) {
                 saveOps.push(saveApiCredential('nvidia', nextNvidiaKey));
+                providersToCheck.add('nvidia');
             }
             if (nextOpenrouterKey) {
                 saveOps.push(saveApiCredential('openrouter', nextOpenrouterKey));
+                providersToCheck.add('openrouter');
             }
             if (nextGeminiKey) {
                 saveOps.push(saveApiCredential('gemini', nextGeminiKey));
+                providersToCheck.add('gemini');
             }
             if (nextClaudeKey) {
                 saveOps.push(saveApiCredential('claude', nextClaudeKey));
+                providersToCheck.add('claude');
             }
 
             await Promise.all(saveOps);
 
+            // Add default models for newly literal providers if they don't have them
+            for (const provider of providersToCheck) {
+                const hasModel = priorityModels.some(m => m.provider === provider);
+                if (!hasModel) {
+                    const defaultModel = providerModels[provider];
+                    try {
+                        await addUserModel({
+                            provider,
+                            model: defaultModel,
+                            reasoning: false
+                        });
+                    } catch (e) {
+                        console.error(`Failed to add default model for ${provider}`, e);
+                    }
+                }
+            }
+            
+            // Refresh models after potential additions
+            const refreshModelData = await getUserModels();
+            setPriorityModels(refreshModelData.models);
+
             const savedPriority = await saveModelPrioritySettings(priorityToSave);
-            const reconciledSavedPriority = reconcilePriorityOrder(savedPriority.modelPriority, priorityModels);
+            const reconciledSavedPriority = reconcilePriorityOrder(savedPriority.modelPriority, refreshModelData.models);
             setManualPriorityIds(reconciledSavedPriority);
 
             await updateStorage({
@@ -439,6 +475,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                 studentEducationLevel: studentEducationLevel.trim() || 'high school',
                 studentMajor: studentMajor.trim(),
                 studentFocusTopic: studentFocusTopic.trim(),
+                aiLanguage: aiLanguage.trim() || 'English',
                 aiModelPriority: reconciledSavedPriority,
             });
 
@@ -606,8 +643,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                 throw new Error('Puter.js is not available in this browser session. Reload the app and try again.');
             }
 
+            // Before testing Puter, ensure its default model is at least registered
+            // if it doesn't exist yet, so it can be used for normal operation.
+            const hasPuterModel = priorityModels.some(m => m.provider === 'puter');
+            if (!hasPuterModel) {
+                try {
+                    const response = await addUserModel({
+                        provider: 'puter',
+                        model: providerModels.puter,
+                        reasoning: false
+                    });
+                    setPriorityModels(response.models);
+                } catch (e) {
+                    console.error('Failed to add default Puter model during test.', e);
+                }
+            }
+
             const response = await puterChat('Reply in 12 words: confirm Puter is connected.', {
-                model: 'gpt-5.4-nano',
+                model: 'gpt-oss-120b',
             });
 
             const text = response.trim();
@@ -769,8 +822,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                 <GraduationCap className="w-4 h-4" style={{ color: '#0ea5e9' }} />
                             </div>
                             <div>
-                                <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>User Information</p>
-                                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Profile and revision budget</p>
+                                <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Revision Settings</p>
+                                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Language, time limit, revision profile</p>
                             </div>
                         </div>
                         <ChevronDown
@@ -781,6 +834,39 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
 
                     {openSection === 'user-information' && (
                         <div className="mt-4 pt-4 space-y-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                            <div className="rounded-xl p-4 space-y-4" style={subsectionPanelStyle}>
+                                <div className="flex items-center gap-2">
+                                    <Languages className="w-4 h-4" style={{ color: '#0ea5e9' }} />
+                                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Language</p>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label htmlFor="ai-language" className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
+                                        AI Language
+                                    </label>
+                                    <div className="relative">
+                                        <Languages
+                                            className="w-4 h-4"
+                                            style={{ color: 'var(--text-muted)', position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
+                                        />
+                                        <select
+                                            id="ai-language"
+                                            value={aiLanguage}
+                                            onChange={(e) => setAiLanguage(e.target.value)}
+                                            className="input-field"
+                                            style={{ paddingLeft: 36 }}
+                                        >
+                                            {['English', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Arabic', 'Turkish', 'Persian', 'Hindi', 'Japanese', 'Korean', 'Chinese (Simplified)'].map((lang) => (
+                                                <option key={lang} value={lang}>{lang}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                                        Questions, grading answers, and tutor chat will be generated in this language.
+                                    </p>
+                                </div>
+                            </div>
+
                             <div className="rounded-xl p-4 space-y-4" style={subsectionPanelStyle}>
                                 <div className="flex items-center gap-2">
                                     <Clock3 className="w-4 h-4" style={{ color: 'var(--accent-secondary)' }} />
@@ -870,6 +956,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                         className="textarea-field min-h-[88px]"
                                     />
                                 </div>
+
                             </div>
                         </div>
                     )}

@@ -163,6 +163,19 @@ const parseJson = (value, fallback) => {
   }
 };
 
+const normalizeAiLanguage = (value) => {
+  if (typeof value !== 'string') {
+    return 'English';
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return 'English';
+  }
+
+  return normalized.slice(0, 80);
+};
+
 const getUserRevisionModels = async (db, userId) => {
   const rows = await db.all(
     `SELECT id, provider, model, reasoning
@@ -423,7 +436,7 @@ const getStorageBundle = async (userId) => {
   const db = await getDb();
 
   const pref = await db.get(
-      `SELECT completed_revisions_today, revision_seconds_today, daily_revision_minutes_limit, last_revision_date, student_education_level, student_major, student_focus_topic, missed_questions_json, ai_provider, ai_model_overrides_json
+      `SELECT completed_revisions_today, revision_seconds_today, daily_revision_minutes_limit, last_revision_date, student_education_level, student_major, student_focus_topic, ai_language, missed_questions_json, ai_provider, ai_model_overrides_json
        FROM user_preferences WHERE user_id = ?`,
     [userId]
   );
@@ -480,6 +493,7 @@ const getStorageBundle = async (userId) => {
     studentEducationLevel: pref?.student_education_level || 'high school',
     studentMajor: pref?.student_major || '',
     studentFocusTopic: pref?.student_focus_topic || '',
+    aiLanguage: normalizeAiLanguage(pref?.ai_language || 'English'),
     missedQuestionHistoryByTopic: parseJson(pref?.missed_questions_json || '{}', {}),
     aiProvider: pref?.ai_provider || 'groq',
     aiModelOverrides: parseJson(pref?.ai_model_overrides_json || '{}', {}),
@@ -1581,12 +1595,13 @@ app.patch('/api/app/storage', async (req, res) => {
       typeof payload.studentEducationLevel === 'string' ||
       typeof payload.studentMajor === 'string' ||
       typeof payload.studentFocusTopic === 'string' ||
+      typeof payload.aiLanguage === 'string' ||
       typeof payload.missedQuestionHistoryByTopic !== 'undefined' ||
       typeof payload.aiProvider === 'string' ||
       typeof payload.aiModelOverrides !== 'undefined'
     ) {
       const currentPref = await db.get(
-        `SELECT completed_revisions_today, revision_seconds_today, daily_revision_minutes_limit, last_revision_date, student_education_level, student_major, student_focus_topic, missed_questions_json, ai_provider, ai_model_overrides_json
+        `SELECT completed_revisions_today, revision_seconds_today, daily_revision_minutes_limit, last_revision_date, student_education_level, student_major, student_focus_topic, ai_language, missed_questions_json, ai_provider, ai_model_overrides_json
            FROM user_preferences WHERE user_id = ?`,
         [userId]
       );
@@ -1600,6 +1615,7 @@ app.patch('/api/app/storage', async (req, res) => {
                 student_education_level = ?,
                 student_major = ?,
                 student_focus_topic = ?,
+                ai_language = ?,
                 missed_questions_json = ?,
                 ai_provider = ?,
                 ai_model_overrides_json = ?,
@@ -1627,6 +1643,9 @@ app.patch('/api/app/storage', async (req, res) => {
           typeof payload.studentFocusTopic === 'string'
             ? payload.studentFocusTopic.trim().slice(0, 240)
             : (currentPref?.student_focus_topic || ''),
+          typeof payload.aiLanguage === 'string'
+            ? normalizeAiLanguage(payload.aiLanguage)
+            : normalizeAiLanguage(currentPref?.ai_language || 'English'),
           typeof payload.missedQuestionHistoryByTopic === 'object' && payload.missedQuestionHistoryByTopic !== null
             ? JSON.stringify(payload.missedQuestionHistoryByTopic)
             : (currentPref?.missed_questions_json || '{}'),
@@ -2421,7 +2440,7 @@ app.delete('/api/app/files/:topicId', async (req, res) => {
 app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
   try {
     const userId = getUserId(req);
-    const { history, newPrompt, topicContext, mode } = req.body || {};
+    const { history, newPrompt, topicContext, mode, aiLanguage } = req.body || {};
     if (!userId) {
       return res.status(401).json({ error: 'Authentication required.' });
     }
@@ -2445,6 +2464,8 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
     const resolvedMode = mode === 'questions' || mode === 'grading' || mode === 'chat'
       ? mode
       : (isFirstTurn ? 'questions' : 'grading');
+    const userPref = await db.get(`SELECT ai_language FROM user_preferences WHERE user_id = ?`, [userId]);
+    const resolvedLanguage = normalizeAiLanguage(aiLanguage || userPref?.ai_language || 'English');
     const shouldInjectTopicContext = resolvedMode === 'questions' && isFirstTurn;
     let tutorAttachment = null;
     let attachmentPromptContext = 'Attached file context: none';
@@ -2523,11 +2544,14 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
     const messages = [
       {
         role: 'system',
-        content: resolvedMode === 'questions'
-          ? generationSystemPrompt
-          : resolvedMode === 'grading'
-            ? gradingSystemPrompt
-            : chatSystemPrompt,
+        content: [
+          resolvedMode === 'questions'
+            ? generationSystemPrompt
+            : resolvedMode === 'grading'
+              ? gradingSystemPrompt
+              : chatSystemPrompt,
+          `- Generate all output in ${resolvedLanguage}.`,
+        ].join('\n'),
       },
       ...((history || []).slice(-6)).map((entry) => ({
         role: entry.role === 'model' ? 'assistant' : 'user',

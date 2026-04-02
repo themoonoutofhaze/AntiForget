@@ -297,6 +297,7 @@ export const SocraticArena: React.FC = () => {
             studentLevel: (storage.studentEducationLevel || 'high school').trim() || 'high school',
             studentMajor: (storage.studentMajor || '').trim(),
             studentFocusTopic: (storage.studentFocusTopic || '').trim(),
+            aiLanguage: (storage.aiLanguage || 'English').trim() || 'English',
             missedQuestionHistory: storage.missedQuestionHistoryByTopic[topicId] || [],
         };
     };
