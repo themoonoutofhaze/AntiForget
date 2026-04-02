@@ -1,6 +1,3 @@
-import { getCurrentUserId } from '../userContext';
-import { getAuthToken } from '../auth';
-
 const API_BASE = '/api/app';
 
 export const buildApiUrl = (path: string) => `${API_BASE}${path}`;
@@ -23,15 +20,23 @@ const parseError = (status: number, text: string) => {
 
 const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const headers = new Headers(init?.headers);
-  const token = getAuthToken();
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
 
   const res = await fetch(buildApiUrl(path), {
     ...init,
     headers,
   });
+
+  if (res.status === 401) {
+    // Only force a reload if there was a stale session (user stored locally but cookie gone).
+    // If already unauthenticated, just throw so the caller handles it gracefully.
+    const hadSession = !!localStorage.getItem('synapse_auth_user');
+    localStorage.removeItem('synapse_auth_user');
+    localStorage.removeItem('synapse_auth_token');
+    if (hadSession) {
+      window.location.reload();
+    }
+    throw new Error('Session expired. Please sign in again.');
+  }
 
   if (!res.ok) {
     const text = await res.text();
@@ -42,16 +47,14 @@ const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
 };
 
 export const apiGet = async <T>(path: string): Promise<T> => {
-  const userId = encodeURIComponent(getCurrentUserId());
-  const joiner = path.includes('?') ? '&' : '?';
-  return requestJson<T>(`${path}${joiner}userId=${userId}`);
+  return requestJson<T>(path);
 };
 
 export const apiPatch = async <T>(path: string, body: Record<string, unknown>): Promise<T> => {
   return requestJson<T>(path, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', 'x-user-id': getCurrentUserId() },
-    body: JSON.stringify({ ...body, userId: getCurrentUserId() }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   });
 };
 
@@ -62,27 +65,25 @@ export const apiPost = async <T>(
 ): Promise<T> => {
   const headers = new Headers(init?.headers);
   headers.set('Content-Type', 'application/json');
-  headers.set('x-user-id', getCurrentUserId());
 
   return requestJson<T>(path, {
     ...init,
     method: 'POST',
     headers,
-    body: JSON.stringify({ ...body, userId: getCurrentUserId() }),
+    body: JSON.stringify(body),
   });
 };
 
 export const apiPut = async <T>(path: string, body: Record<string, unknown>): Promise<T> => {
   return requestJson<T>(path, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'x-user-id': getCurrentUserId() },
-    body: JSON.stringify({ ...body, userId: getCurrentUserId() }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   });
 };
 
 export const apiDelete = async <T>(path: string): Promise<T> => {
   return requestJson<T>(path, {
     method: 'DELETE',
-    headers: { 'x-user-id': getCurrentUserId() },
   });
 };

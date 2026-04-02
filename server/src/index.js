@@ -12,6 +12,8 @@ import multer from 'multer';
 import { google } from 'googleapis';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
 import { OAuth2Client as GoogleOAuthClient } from 'google-auth-library';
 
@@ -27,7 +29,9 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
 const execFileAsync = promisify(execFile);
 
+app.use(helmet());
 app.use(cors({ origin: config.frontendBaseUrl, credentials: true }));
+app.use(cookieParser());
 app.use(express.json({ limit: '2mb' }));
 
 const authRateLimiter = rateLimit({
@@ -48,11 +52,36 @@ const tutorRateLimiter = rateLimit({
 
 const PROVIDERS = new Set(['openai', 'groq', 'mistral', 'nvidia', 'openrouter', 'gemini', 'claude', 'puter']);
 const FILE_PROVIDERS = new Set(['local', 'google-drive']);
-const AUTH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
+const AUTH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7;
+const AUTH_REFRESH_WINDOW_SECONDS = 60 * 60 * 24 * 2;
 const AUTH_ISSUER = 'antiforget-app';
-const JWT_SECRET = /^[0-9a-fA-F]{64}$/.test(config.encryptionKey)
-  ? Buffer.from(config.encryptionKey, 'hex')
-  : crypto.createHash('sha256').update(config.encryptionKey).digest();
+const AUTH_COOKIE_NAME = 'af_auth_token';
+const isProduction = process.env.NODE_ENV === 'production';
+
+const setAuthCookie = (res, token) => {
+  res.cookie(AUTH_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'strict' : 'lax',
+    maxAge: AUTH_TOKEN_TTL_SECONDS * 1000,
+    path: '/',
+  });
+};
+
+const clearAuthCookie = (res) => {
+  res.clearCookie(AUTH_COOKIE_NAME, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'strict' : 'lax',
+    path: '/',
+  });
+};
+const deriveKeyBuffer = (raw) => {
+  if (/^[0-9a-fA-F]{64}$/.test(raw)) return Buffer.from(raw, 'hex');
+  return crypto.createHash('sha256').update(raw).digest();
+};
+const JWT_SECRET = deriveKeyBuffer(config.jwtSecret);
+const HMAC_SECRET = crypto.createHmac('sha256', JWT_SECRET).update('oauth-state-hmac').digest();
 
 const normalizeProvider = (value) => {
   if (typeof value !== 'string') {
@@ -214,6 +243,10 @@ const addUserRevisionModel = async (db, userId, provider, model, reasoning) => {
     throw new Error('Model name is required');
   }
 
+  if (normalizedModel.length > 200) {
+    throw new Error('Model name is too long (max 200 characters)');
+  }
+
   const row = await db.get(
     `SELECT id FROM user_revision_models WHERE user_id = ? AND provider = ? AND model = ?`,
     [userId, normalizedProvider, normalizedModel]
@@ -264,11 +297,17 @@ const pickNativeFolderPath = async (defaultPath) => {
   }
 
   const fallbackPath = defaultPath && fs.existsSync(defaultPath) ? defaultPath : os.homedir();
-  const escapedPath = fallbackPath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+  // Sanitize the path: strip any characters that could break out of the AppleScript
+  // string context (quotes, backslashes, control chars). Pass path via env variable
+  // to avoid shell injection entirely.
+  const sanitizedPath = fallbackPath.replace(/[\x00-\x1f"\\]/g, '');
 
   const { stdout } = await execFileAsync('osascript', [
     '-e',
-    `set selectedPath to POSIX path of (choose folder with prompt "Select folder for AntiForget uploads" default location POSIX file "${escapedPath}")`,
+    `set defaultDir to POSIX file "${sanitizedPath}"`,
+    '-e',
+    'set selectedPath to POSIX path of (choose folder with prompt "Select folder for AntiForget uploads" default location defaultDir)',
     '-e',
     'return selectedPath',
   ]);
@@ -320,8 +359,38 @@ const timingSafeEqualHex = (a, b) => {
   return crypto.timingSafeEqual(left, right);
 };
 
-const hashPasswordWithSalt = (password, saltHex) => {
-  return crypto.pbkdf2Sync(password, Buffer.from(saltHex, 'hex'), 120000, 32, 'sha256').toString('hex');
+const KDF_CURRENT_VERSION = 2;
+const KDF_ITERATIONS = { 1: 120_000, 2: 600_000 };
+
+const hashPasswordWithSalt = (password, saltHex, version = KDF_CURRENT_VERSION) => {
+  const normalized = typeof password === 'string' ? password : '';
+  const iterations = KDF_ITERATIONS[version] ?? 600_000;
+  return crypto.pbkdf2Sync(normalized, Buffer.from(saltHex, 'hex'), iterations, 32, 'sha256').toString('hex');
+};
+
+const signOAuthState = (payload) => {
+  const json = JSON.stringify(payload);
+  const data = Buffer.from(json, 'utf8').toString('base64url');
+  const sig = crypto.createHmac('sha256', HMAC_SECRET).update(data).digest('base64url');
+  return `${data}.${sig}`;
+};
+
+const verifyOAuthState = (state) => {
+  if (typeof state !== 'string' || !state.includes('.')) return null;
+  const dotIndex = state.lastIndexOf('.');
+  const data = state.slice(0, dotIndex);
+  const sig = state.slice(dotIndex + 1);
+  const expected = crypto.createHmac('sha256', HMAC_SECRET).update(data).digest('base64url');
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  } catch {
+    return null;
+  }
+  try {
+    return JSON.parse(Buffer.from(data, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
 };
 
 const createAuthToken = (payload) => {
@@ -831,7 +900,7 @@ app.post('/api/app/auth/signup', authRateLimiter, async (req, res) => {
     if (!email || !email.includes('@')) {
       return res.status(400).json({ error: 'Enter a valid email address.' });
     }
-    if (password.trim().length < 8) {
+    if (!password || password.length < 8) {
       return res.status(400).json({ error: 'Password must be at least 8 characters.' });
     }
 
@@ -851,15 +920,16 @@ app.post('/api/app/auth/signup', authRateLimiter, async (req, res) => {
       [userId, name, email]
     );
     await db.run(
-      `INSERT INTO user_auth_credentials(user_id, password_salt, password_hash, updated_at)
-       VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
-      [userId, saltHex, passwordHash]
+      `INSERT INTO user_auth_credentials(user_id, password_salt, password_hash, kdf_version, updated_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [userId, saltHex, passwordHash, KDF_CURRENT_VERSION]
     );
     await ensureUser(userId);
     await db.exec('COMMIT');
 
     const token = createAuthToken({ userId, email });
-    return res.status(201).json({ user: { id: userId, name, email }, token });
+    setAuthCookie(res, token);
+    return res.status(201).json({ user: { id: userId, name, email } });
   } catch (error) {
     try {
       const db = await getDb();
@@ -880,13 +950,13 @@ app.post('/api/app/auth/signin', authRateLimiter, async (req, res) => {
     if (!email || !email.includes('@')) {
       return res.status(400).json({ error: 'Enter a valid email address.' });
     }
-    if (!password.trim()) {
+    if (!password) {
       return res.status(400).json({ error: 'Password is required.' });
     }
 
     const db = await getDb();
     const row = await db.get(
-      `SELECT u.id, u.name, u.email, c.password_salt, c.password_hash
+      `SELECT u.id, u.name, u.email, c.password_salt, c.password_hash, c.kdf_version
        FROM users u
        INNER JOIN user_auth_credentials c ON c.user_id = u.id
        WHERE lower(u.email) = ?`,
@@ -897,13 +967,23 @@ app.post('/api/app/auth/signin', authRateLimiter, async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
-    const expectedHash = hashPasswordWithSalt(password, row.password_salt);
+    const storedVersion = row.kdf_version || 1;
+    const expectedHash = hashPasswordWithSalt(password, row.password_salt, storedVersion);
     if (!timingSafeEqualHex(expectedHash, row.password_hash)) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
+    if (storedVersion < KDF_CURRENT_VERSION) {
+      const upgradedHash = hashPasswordWithSalt(password, row.password_salt, KDF_CURRENT_VERSION);
+      await db.run(
+        `UPDATE user_auth_credentials SET password_hash = ?, kdf_version = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`,
+        [upgradedHash, KDF_CURRENT_VERSION, row.id]
+      );
+    }
+
     const token = createAuthToken({ userId: row.id, email: row.email });
-    return res.json({ user: { id: row.id, name: row.name || 'Learner', email: row.email }, token });
+    setAuthCookie(res, token);
+    return res.json({ user: { id: row.id, name: row.name || 'Learner', email: row.email } });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Failed to sign in.' });
@@ -940,9 +1020,9 @@ app.post('/api/app/auth/google', authRateLimiter, async (req, res) => {
 
     const user = await db.get(`SELECT id, name, email FROM users WHERE id = ?`, [payload.sub]);
     const token = createAuthToken({ userId: payload.sub, email: payload.email });
+    setAuthCookie(res, token);
     return res.json({
       user: { id: payload.sub, name: user?.name || 'Learner', email: payload.email, avatarUrl: payload.picture },
-      token,
     });
   } catch (error) {
     console.error(error);
@@ -964,20 +1044,26 @@ app.post('/api/app/auth/passkey/challenge', authRateLimiter, async (req, res) =>
     const expiresAt = Date.now() + 5 * 60 * 1000;
 
     if (type === 'registration') {
-      if (!requestedUserId || !userName) {
-        return res.status(400).json({ error: 'userId and userName are required for registration' });
+      if (!userName) {
+        return res.status(400).json({ error: 'userName is required for registration' });
       }
 
-      const existingCredentials = await db.all(
-        `SELECT credential_id FROM passkey_credentials WHERE user_id = ?`,
-        [requestedUserId]
-      );
+      const serverGeneratedUserId = crypto.randomUUID();
+
+      const existingCredentials = requestedUserId
+        ? await db.all(
+            `SELECT credential_id FROM passkey_credentials WHERE user_id = ?`,
+            [requestedUserId]
+          )
+        : [];
+
+      const registrationUserId = requestedUserId || serverGeneratedUserId;
 
       const options = await generateRegistrationOptions({
         rpName: 'AntiForget',
         rpID,
-        userID: new TextEncoder().encode(requestedUserId),
-        userName: requestedUserId,
+        userID: new TextEncoder().encode(registrationUserId),
+        userName: registrationUserId,
         userDisplayName: userName,
         attestationType: 'none',
         excludeCredentials: existingCredentials.map((c) => ({ id: c.credential_id, type: 'public-key' })),
@@ -987,14 +1073,14 @@ app.post('/api/app/auth/passkey/challenge', authRateLimiter, async (req, res) =>
       const challengeId = crypto.randomUUID();
       await db.run(
         `INSERT INTO passkey_challenges(id, challenge, user_id, expires_at) VALUES (?, ?, ?, ?)`,
-        [challengeId, options.challenge, requestedUserId, expiresAt]
+        [challengeId, options.challenge, registrationUserId, expiresAt]
       );
-      return res.json({ challengeId, options });
+      return res.json({ challengeId, options, userId: registrationUserId });
     }
 
     const allCredentials = requestedUserId
       ? await db.all(`SELECT credential_id FROM passkey_credentials WHERE user_id = ?`, [requestedUserId])
-      : await db.all(`SELECT credential_id FROM passkey_credentials`);
+      : [];
 
     const options = await generateAuthenticationOptions({
       rpID,
@@ -1016,19 +1102,21 @@ app.post('/api/app/auth/passkey/challenge', authRateLimiter, async (req, res) =>
 
 app.post('/api/app/auth/passkey/register', authRateLimiter, async (req, res) => {
   try {
-    const { challengeId, response, userId, name } = req.body || {};
-    if (!challengeId || !response || !userId || !name) {
-      return res.status(400).json({ error: 'challengeId, response, userId, and name are required' });
+    const { challengeId, response, name } = req.body || {};
+    if (!challengeId || !response || !name) {
+      return res.status(400).json({ error: 'challengeId, response, and name are required' });
     }
 
     const db = await getDb();
     const challengeRow = await db.get(
-      `SELECT challenge FROM passkey_challenges WHERE id = ? AND user_id = ? AND expires_at > ?`,
-      [challengeId, userId, Date.now()]
+      `SELECT challenge, user_id FROM passkey_challenges WHERE id = ? AND expires_at > ?`,
+      [challengeId, Date.now()]
     );
-    if (!challengeRow) {
+    if (!challengeRow || !challengeRow.user_id) {
       return res.status(400).json({ error: 'Challenge not found or expired.' });
     }
+
+    const userId = challengeRow.user_id;
 
     const rpID = new URL(config.frontendBaseUrl).hostname;
     const verification = await verifyRegistrationResponse({
@@ -1062,9 +1150,9 @@ app.post('/api/app/auth/passkey/register', authRateLimiter, async (req, res) => 
 
     const user = await db.get(`SELECT id, name, email FROM users WHERE id = ?`, [userId]);
     const token = createAuthToken({ userId, email: user?.email || '' });
+    setAuthCookie(res, token);
     return res.status(201).json({
       user: { id: userId, name: user?.name || name, email: user?.email || `${userId}@passkey.local` },
-      token,
     });
   } catch (error) {
     console.error(error);
@@ -1124,9 +1212,9 @@ app.post('/api/app/auth/passkey/authenticate', authRateLimiter, async (req, res)
     if (!user) return res.status(401).json({ error: 'User not found.' });
 
     const token = createAuthToken({ userId: user.id, email: user.email || '' });
+    setAuthCookie(res, token);
     return res.json({
       user: { id: user.id, name: user.name || 'Learner', email: user.email || `${user.id}@passkey.local` },
-      token,
     });
   } catch (error) {
     console.error(error);
@@ -1134,11 +1222,125 @@ app.post('/api/app/auth/passkey/authenticate', authRateLimiter, async (req, res)
   }
 });
 
+app.post('/api/app/auth/refresh', authRateLimiter, async (req, res) => {
+  try {
+    const token = readBearerToken(req) || (req.cookies && req.cookies[AUTH_COOKIE_NAME]) || null;
+    if (!token) {
+      return res.status(401).json({ error: 'Token is required.' });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET, { issuer: AUTH_ISSUER });
+    } catch (err) {
+      if (err?.name === 'TokenExpiredError') {
+        // Verify signature even for expired tokens — ignoring only the expiration claim.
+        let expired;
+        try {
+          expired = jwt.verify(token, JWT_SECRET, { issuer: AUTH_ISSUER, ignoreExpiration: true });
+        } catch {
+          return res.status(401).json({ error: 'Token signature is invalid.' });
+        }
+        if (expired && typeof expired.sub === 'string') {
+          const expAt = (expired.exp || 0) * 1000;
+          const now = Date.now();
+          if (now - expAt <= AUTH_REFRESH_WINDOW_SECONDS * 1000) {
+            const db = await getDb();
+            const user = await db.get(`SELECT id, name, email FROM users WHERE id = ?`, [expired.sub]);
+            if (user) {
+              const newToken = createAuthToken({ userId: user.id, email: user.email || '' });
+              setAuthCookie(res, newToken);
+              return res.json({ user: { id: user.id, name: user.name || 'Learner', email: user.email || '' } });
+            }
+          }
+        }
+      }
+      return res.status(401).json({ error: 'Token is invalid or too old to refresh.' });
+    }
+
+    if (typeof decoded.sub !== 'string') {
+      return res.status(401).json({ error: 'Invalid token.' });
+    }
+
+    const db = await getDb();
+    const user = await db.get(`SELECT id, name, email FROM users WHERE id = ?`, [decoded.sub]);
+    if (!user) {
+      return res.status(401).json({ error: 'User not found.' });
+    }
+
+    const newToken = createAuthToken({ userId: user.id, email: user.email || '' });
+    setAuthCookie(res, newToken);
+    return res.json({ user: { id: user.id, name: user.name || 'Learner', email: user.email || '' } });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Token refresh failed.' });
+  }
+});
+
+app.post('/api/app/auth/google/token', authRateLimiter, async (req, res) => {
+  try {
+    const { accessToken } = req.body || {};
+    if (!accessToken || typeof accessToken !== 'string') {
+      return res.status(400).json({ error: 'accessToken is required.' });
+    }
+
+    const googleClientId = process.env.VITE_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || '';
+
+    const tokenInfoRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`);
+    if (!tokenInfoRes.ok) {
+      return res.status(401).json({ error: 'Failed to verify Google access token.' });
+    }
+    const tokenInfo = await tokenInfoRes.json();
+    if (googleClientId && tokenInfo.aud !== googleClientId) {
+      return res.status(401).json({ error: 'Google access token was not issued for this application.' });
+    }
+
+    const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!userInfoRes.ok) {
+      return res.status(401).json({ error: 'Failed to verify Google access token.' });
+    }
+
+    const payload = await userInfoRes.json();
+    if (!payload || !payload.sub || !payload.email) {
+      return res.status(401).json({ error: 'Invalid Google token payload.' });
+    }
+
+    const db = await getDb();
+    await db.run(
+      `INSERT INTO users(id, name, email, updated_at)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, updated_at = CURRENT_TIMESTAMP`,
+      [payload.sub, payload.name || 'Learner', payload.email]
+    );
+    await ensureUser(payload.sub);
+
+    const user = await db.get(`SELECT id, name, email FROM users WHERE id = ?`, [payload.sub]);
+    const token = createAuthToken({ userId: payload.sub, email: payload.email });
+    setAuthCookie(res, token);
+    return res.json({
+      user: { id: payload.sub, name: user?.name || 'Learner', email: payload.email, avatarUrl: payload.picture },
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(401).json({ error: 'Google token verification failed.' });
+  }
+});
+
+app.post('/api/app/auth/signout', (_req, res) => {
+  clearAuthCookie(res);
+  return res.json({ ok: true });
+});
+
 const PUBLIC_API_PATHS = new Set([
   '/health',
   '/auth/signup',
   '/auth/signin',
+  '/auth/signout',
   '/auth/google',
+  '/auth/google/token',
+  '/auth/refresh',
   '/auth/passkey/challenge',
   '/auth/passkey/register',
   '/auth/passkey/authenticate',
@@ -1146,7 +1348,7 @@ const PUBLIC_API_PATHS = new Set([
 ]);
 
 app.use('/api/app', (req, _res, next) => {
-  const token = readBearerToken(req);
+  const token = readBearerToken(req) || (req.cookies && req.cookies[AUTH_COOKIE_NAME]) || null;
   if (token) {
     const claims = verifyAuthToken(token);
     if (claims?.userId) {
@@ -1192,6 +1394,15 @@ app.patch('/api/app/storage', async (req, res) => {
     await ensureUser(userId);
     const db = await getDb();
     const payload = req.body || {};
+
+    if (
+      (typeof payload.missedQuestionHistoryByTopic === 'object' && payload.missedQuestionHistoryByTopic !== null
+        && JSON.stringify(payload.missedQuestionHistoryByTopic).length > 100_000) ||
+      (typeof payload.aiModelOverrides === 'object' && payload.aiModelOverrides !== null
+        && JSON.stringify(payload.aiModelOverrides).length > 50_000)
+    ) {
+      return res.status(400).json({ error: 'Payload fields exceed allowed size limit.' });
+    }
 
     await db.exec('BEGIN');
 
@@ -1788,7 +1999,7 @@ app.get('/api/app/drive/auth-url', async (req, res) => {
       access_type: 'offline',
       prompt: 'consent',
       scope: ['https://www.googleapis.com/auth/drive.file'],
-      state: Buffer.from(JSON.stringify(statePayload)).toString('base64url'),
+      state: signOAuthState(statePayload),
     });
 
     return res.json({ authUrl });
@@ -1805,7 +2016,11 @@ app.get('/api/app/drive/callback', async (req, res) => {
       return res.status(400).send('Missing code/state');
     }
 
-    const decodedState = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
+    const decodedState = verifyOAuthState(state);
+    if (!decodedState) {
+      return res.status(400).send('Invalid or tampered state parameter');
+    }
+
     const userId = decodedState.userId;
     const rawReturnUrl = typeof decodedState.returnUrl === 'string' ? decodedState.returnUrl : '';
     const returnUrl = rawReturnUrl.startsWith(config.frontendBaseUrl)
@@ -1864,9 +2079,9 @@ const decryptDriveToken = (raw) => {
       return decryptText(parsed);
     }
   } catch {
-    // Fall through for legacy plaintext tokens
+    // Reject tokens that are not valid encrypted JSON.
   }
-  return raw;
+  return null;
 };
 
 const getDriveClientForUser = async (userId) => {
@@ -1914,6 +2129,52 @@ const getDriveClientForUser = async (userId) => {
   return google.drive({ version: 'v3', auth: oauthClient });
 };
 
+const ALLOWED_UPLOAD_MIMES = new Set([
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'text/plain',
+  'text/markdown',
+]);
+
+const MAGIC_BYTES = [
+  { mime: 'application/pdf', bytes: [0x25, 0x50, 0x44, 0x46] },          // %PDF
+  { mime: 'image/png',       bytes: [0x89, 0x50, 0x4e, 0x47] },          // .PNG
+  { mime: 'image/jpeg',      bytes: [0xff, 0xd8, 0xff] },                // JPEG SOI
+  { mime: 'image/gif',       bytes: [0x47, 0x49, 0x46, 0x38] },          // GIF8
+  { mime: 'image/webp',      bytes: [0x52, 0x49, 0x46, 0x46] },          // RIFF (WebP)
+];
+
+const detectMimeFromMagic = (buffer) => {
+  for (const entry of MAGIC_BYTES) {
+    if (buffer.length >= entry.bytes.length && entry.bytes.every((b, i) => buffer[i] === b)) {
+      return entry.mime;
+    }
+  }
+  return null;
+};
+
+const isUploadMimeAllowed = (claimedMime, buffer) => {
+  if (!ALLOWED_UPLOAD_MIMES.has(claimedMime)) {
+    return false;
+  }
+  // Text-based types (plain text, markdown) can't be validated via magic bytes.
+  if (claimedMime.startsWith('text/')) {
+    return true;
+  }
+  const detected = detectMimeFromMagic(buffer);
+  if (!detected) {
+    return false;
+  }
+  // For WebP the RIFF magic is shared; accept if claimed type is webp.
+  if (claimedMime === 'image/webp' && detected === 'image/webp') {
+    return true;
+  }
+  return detected === claimedMime;
+};
+
 app.post('/api/app/files/upload', upload.single('file'), async (req, res) => {
   try {
     const userId = getUserId(req);
@@ -1922,6 +2183,12 @@ app.post('/api/app/files/upload', upload.single('file'), async (req, res) => {
 
     if (!userId || !topicId || !file) {
       return res.status(400).json({ error: 'userId, topicId and file are required' });
+    }
+
+    if (!isUploadMimeAllowed(file.mimetype, file.buffer)) {
+      return res.status(400).json({
+        error: `File type "${file.mimetype}" is not allowed. Accepted types: PDF, PNG, JPEG, GIF, WebP, plain text, markdown.`,
+      });
     }
 
     await ensureUser(userId);
@@ -2164,8 +2431,8 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
 
       const requestController = new AbortController();
       const requestTimeoutMs = candidate.provider === 'nvidia'
-        ? (resolvedMode === 'questions' ? 30000 : 45000)
-        : (resolvedMode === 'questions' ? 30000 : 14000);
+        ? (resolvedMode === 'questions' ? 10000 : 45000)
+        : (resolvedMode === 'questions' ? 10000 : 14000);
       const timeoutId = setTimeout(() => requestController.abort(), requestTimeoutMs);
 
       let aiRes;

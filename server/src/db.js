@@ -222,6 +222,11 @@ export const getDb = async () => {
     } catch {
       // Column already exists.
     }
+    try {
+      await db.exec(`ALTER TABLE user_auth_credentials ADD COLUMN kdf_version INTEGER NOT NULL DEFAULT 1`);
+    } catch {
+      // Column already exists.
+    }
 
     const legacyRows = await db.all(
       `SELECT user_id, ai_model_priority_json FROM user_preferences

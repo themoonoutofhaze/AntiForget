@@ -4,6 +4,11 @@ declare global {
       ai?: {
         chat: (prompt: string, options?: Record<string, unknown>) => Promise<unknown>;
       };
+      auth?: {
+        signIn?: () => Promise<unknown>;
+        isSignedIn?: () => Promise<boolean>;
+        getUser?: () => Promise<unknown>;
+      };
     };
   }
 }

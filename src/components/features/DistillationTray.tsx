@@ -241,7 +241,7 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
                 : 'Select a topic to update details and manage links.';
 
     return (
-        <div className="animate-slide-up w-full space-y-5 max-w-4xl mx-auto">
+        <div className="animate-slide-up w-full space-y-5">
 
             {/* ── No mode: header + mode picker ── */}
             {!mode && (
@@ -258,12 +258,12 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
                     </div>
 
                     <div className="p-6  relative z-10">
-                        <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="grid gap-3 grid-cols-2">
                             <button
                                 id="topic-create-btn"
                                 type="button"
                                 onClick={() => { resetForm(); setMode('new'); }}
-                                className="p-5 text-left rounded-xl border transition-all duration-200 shadow-sm bg-emerald-500/[0.06] border-emerald-500/20 hover:bg-emerald-500/[0.12] hover:border-emerald-500/40 hover:shadow-md"
+                                className="p-4 text-left rounded-xl border transition-all duration-200 shadow-sm bg-emerald-500/[0.06] border-emerald-500/20 hover:bg-emerald-500/[0.12] hover:border-emerald-500/40 hover:shadow-md"
                             >
                                 <div className="flex items-center gap-2 mb-2">
                                     <UploadCloud className="w-4 h-4 shrink-0 text-emerald-500" aria-hidden="true" />
@@ -277,7 +277,7 @@ export const DistillationTray: React.FC<DistillationTrayProps> = ({ onTopicModeA
                                 id="topic-edit-btn"
                                 type="button"
                                 onClick={() => { resetForm(); setMode('edit'); }}
-                                className="p-5 text-left rounded-xl border transition-all duration-200 shadow-sm bg-blue-500/[0.06] border-blue-500/20 hover:bg-blue-500/[0.12] hover:border-blue-500/40 hover:shadow-md"
+                                className="p-4 text-left rounded-xl border transition-all duration-200 shadow-sm bg-blue-500/[0.06] border-blue-500/20 hover:bg-blue-500/[0.12] hover:border-blue-500/40 hover:shadow-md"
                             >
                                 <div className="flex items-center gap-2 mb-2">
                                     <Pencil className="w-4 h-4 shrink-0 text-blue-500" aria-hidden="true" />

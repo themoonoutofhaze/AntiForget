@@ -3,6 +3,7 @@ import { startRegistration, startAuthentication } from '@simplewebauthn/browser'
 const AUTH_KEY = 'synapse_auth_user';
 const PASSKEY_ACCOUNT_KEY = 'synapse_passkey_account';
 const AUTH_TOKEN_KEY = 'synapse_auth_token';
+const LEGACY_TOKEN_CLEARED_KEY = 'synapse_legacy_token_cleared';
 
 export interface AuthUser {
     id: string;
@@ -18,7 +19,6 @@ interface PasskeyAccount {
 
 interface EmailAuthResponse {
     user: AuthUser;
-    token: string;
 }
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
@@ -83,28 +83,37 @@ export const getStoredUser = (): AuthUser | null => {
     }
 };
 
-export const storeUser = (user: AuthUser, token?: string) => {
+export const storeUser = (user: AuthUser, _token?: string) => {
     localStorage.setItem(AUTH_KEY, JSON.stringify(user));
-    if (token) {
-        localStorage.setItem(AUTH_TOKEN_KEY, token);
+    // Token is now stored in an httpOnly cookie set by the server.
+    // Clear any legacy localStorage token on first store.
+    if (!localStorage.getItem(LEGACY_TOKEN_CLEARED_KEY)) {
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+        localStorage.setItem(LEGACY_TOKEN_CLEARED_KEY, '1');
     }
 };
 
 export const getAuthToken = (): string | null => {
-    const raw = localStorage.getItem(AUTH_TOKEN_KEY);
-    return raw && raw.trim() ? raw : null;
+    // Auth token is now in an httpOnly cookie — not readable from JS.
+    // Return null so callers don't set a redundant Authorization header.
+    return null;
 };
 
-export const storeAuthToken = (token: string) => {
-    localStorage.setItem(AUTH_TOKEN_KEY, token);
+export const storeAuthToken = (_token: string) => {
+    // No-op: token is managed as an httpOnly cookie by the server.
 };
 
-export const clearStoredUser = () => {
+export const clearStoredUser = async () => {
     localStorage.removeItem(AUTH_KEY);
     localStorage.removeItem(AUTH_TOKEN_KEY);
+    try {
+        await fetch('/api/app/auth/signout', { method: 'POST' });
+    } catch {
+        // Best-effort cookie clear.
+    }
 };
 
-export const verifyGoogleCredentialWithServer = async (credential: string): Promise<{ user: AuthUser; token: string }> => {
+export const verifyGoogleCredentialWithServer = async (credential: string): Promise<{ user: AuthUser }> => {
     const res = await fetch('/api/app/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -114,7 +123,34 @@ export const verifyGoogleCredentialWithServer = async (credential: string): Prom
         const parsed = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(parsed?.error || 'Google Sign-In verification failed.');
     }
-    return res.json() as Promise<{ user: AuthUser; token: string }>;
+    return res.json() as Promise<{ user: AuthUser }>;
+};
+
+export const verifyGoogleAccessTokenWithServer = async (accessToken: string): Promise<{ user: AuthUser }> => {
+    const res = await fetch('/api/app/auth/google/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken }),
+    });
+    if (!res.ok) {
+        const parsed = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(parsed?.error || 'Google Sign-In verification failed.');
+    }
+    return res.json() as Promise<{ user: AuthUser }>;
+};
+
+export const refreshAuthToken = async (): Promise<{ user: AuthUser } | null> => {
+    try {
+        const res = await fetch('/api/app/auth/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        if (!res.ok) return null;
+        const data = await res.json() as { user: AuthUser };
+        return data;
+    } catch {
+        return null;
+    }
 };
 
 export const isPasskeySupported = () => {
@@ -130,32 +166,28 @@ export const registerPasskeyUser = async (name: string): Promise<AuthUser> => {
         throw new Error('Passkeys are not supported on this browser.');
     }
 
-    const userId = crypto.randomUUID();
-
     const challengeRes = await fetch('/api/app/auth/passkey/challenge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'registration', userId, userName: name }),
+        body: JSON.stringify({ type: 'registration', userName: name }),
     });
     if (!challengeRes.ok) {
         throw new Error('Failed to get passkey challenge from server.');
     }
-    const { challengeId, options } = await challengeRes.json() as { challengeId: string; options: object };
+    const { challengeId, options } = await challengeRes.json() as { challengeId: string; options: object; userId: string };
 
     const registrationResponse = await startRegistration({ optionsJSON: options as Parameters<typeof startRegistration>[0]['optionsJSON'] });
 
     const registerRes = await fetch('/api/app/auth/passkey/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ challengeId, response: registrationResponse, userId, name }),
+        body: JSON.stringify({ challengeId, response: registrationResponse, name }),
     });
     if (!registerRes.ok) {
         const parsed = await registerRes.json().catch(() => ({})) as { error?: string };
         throw new Error(parsed?.error || 'Passkey registration failed.');
     }
-    const { user, token } = await registerRes.json() as { user: AuthUser; token: string };
-
-    storeAuthToken(token);
+    const { user } = await registerRes.json() as { user: AuthUser };
 
     const account: PasskeyAccount = {
         credentialIdBase64Url: registrationResponse.id,
@@ -197,16 +229,14 @@ export const authenticateWithPasskey = async (): Promise<AuthUser> => {
         const parsed = await verifyRes.json().catch(() => ({})) as { error?: string };
         throw new Error(parsed?.error || 'Passkey authentication failed.');
     }
-    const { user, token } = await verifyRes.json() as { user: AuthUser; token: string };
+    const { user } = await verifyRes.json() as { user: AuthUser };
 
-    storeAuthToken(token);
     return user;
 };
 
 export const registerWithEmailPassword = async (name: string, email: string, password: string): Promise<AuthUser> => {
     const normalizedName = name.trim();
     const normalizedEmail = normalizeEmail(email);
-    const normalizedPassword = password.trim();
 
     if (!normalizedName) {
         throw new Error('Name is required.');
@@ -214,36 +244,33 @@ export const registerWithEmailPassword = async (name: string, email: string, pas
     if (!normalizedEmail || !normalizedEmail.includes('@')) {
         throw new Error('Enter a valid email address.');
     }
-    if (normalizedPassword.length < 8) {
+    if (password.length < 8) {
         throw new Error('Password must be at least 8 characters.');
     }
 
     const response = await postEmailAuth('/api/app/auth/signup', {
         name: normalizedName,
         email: normalizedEmail,
-        password: normalizedPassword,
+        password,
     });
 
-    storeAuthToken(response.token);
     return response.user;
 };
 
 export const signInWithEmailPassword = async (email: string, password: string): Promise<AuthUser> => {
     const normalizedEmail = normalizeEmail(email);
-    const normalizedPassword = password.trim();
 
     if (!normalizedEmail || !normalizedEmail.includes('@')) {
         throw new Error('Enter a valid email address.');
     }
-    if (!normalizedPassword) {
+    if (!password) {
         throw new Error('Password is required.');
     }
 
     const response = await postEmailAuth('/api/app/auth/signin', {
         email: normalizedEmail,
-        password: normalizedPassword,
+        password,
     });
 
-    storeAuthToken(response.token);
     return response.user;
 };

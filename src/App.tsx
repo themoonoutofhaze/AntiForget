@@ -12,7 +12,6 @@ import { getStorage } from './utils/storage';
 import { LoginScreen } from './components/auth/LoginScreen';
 import {
     clearStoredUser,
-    getAuthToken,
     getStoredUser,
     storeUser,
     type AuthUser,
@@ -180,28 +179,20 @@ function App() {
     }, [theme, themeMode]);
 
     useEffect(() => {
+        if (!user) return;
         getStorage().then((s) => {
             setCompletedRevisions(s.completedRevisionsToday);
             setDailyGoal(Math.max(1, Math.floor((s.dailyRevisionMinutesLimit || 60) / 20)));
         });
-    }, [currentView]);
+    }, [currentView, user]);
 
-    const handleLogin = (nextUser: AuthUser, options?: { keepToken?: boolean }) => {
-        const shouldKeepToken = options?.keepToken === true;
-
-        if (shouldKeepToken) {
-            const token = getAuthToken();
-            storeUser(nextUser, token || undefined);
-        } else {
-            clearStoredUser();
-            storeUser(nextUser);
-        }
-
+    const handleLogin = (nextUser: AuthUser, _options?: { keepToken?: boolean }) => {
+        storeUser(nextUser);
         setUser(nextUser);
     };
 
     const handleLogout = () => {
-        clearStoredUser();
+        void clearStoredUser();
         setUser(null);
     };
 

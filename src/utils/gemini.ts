@@ -162,6 +162,10 @@ const buildTutorPrompt = (
             ? topicContext.missedQuestionHistory.filter((item) => typeof item === 'string' && item.trim()).slice(0, 5)
             : [];
 
+        const connectionQuestionInstruction = linkedTopics.length > 0
+            ? `3. CONNECTION - Must explore the relationship between "${topicName}" and "${linkedTopics[0]}"${linkedTopics.length > 1 ? ` (or other linked topics: ${linkedTopics.slice(1).join(', ')})` : ''}.`
+            : '3. CONNECTION - Explore how this topic relates to other relevant topics of your choosing.';
+
         finalPrompt = [
             `Topic: ${topicName}`,
             `Linked topics: ${linkedTopics.length > 0 ? linkedTopics.join(', ') : 'None'}`,
@@ -177,7 +181,7 @@ const buildTutorPrompt = (
             'Generate exactly 3 questions of these types, in this order:',
             '1. CONCEPTUAL',
             '2. APPLIED',
-            '3. CONNECTION',
+            connectionQuestionInstruction,
             '',
             `User: ${newPrompt}`,
         ].join('\n');
@@ -336,7 +340,8 @@ export const extractQuestionScores = (text: string, expectedIndices: number[]): 
     const regex = /Q([1-3])\s*Score\s*:\s*([0-4](?:\.\d+)?)/gi;
     const foundScores: Record<number, number> = {};
 
-    for (const match of text.matchAll(regex)) {
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(text)) !== null) {
         const qIndex = Number(match[1]);
         const parsed = Number.parseFloat(match[2]);
         if (!Number.isNaN(parsed) && parsed >= 0 && parsed <= 4) {

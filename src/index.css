@@ -1083,8 +1083,8 @@
 
 @media (min-width: 1280px) {
   .topics-layout {
-    grid-template-columns: 380px minmax(0, 1fr);
-    gap: 20px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
   }
 
   .topics-layout--single {
@@ -1092,11 +1092,11 @@
   }
 
   .topics-layout-form {
-    position: sticky;
-    top: 18px;
-    max-height: calc(100vh - 36px);
-    overflow: auto;
-    padding-right: 4px;
+    position: static;
+    top: auto;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
   }
 
   .topics-graph-shell {

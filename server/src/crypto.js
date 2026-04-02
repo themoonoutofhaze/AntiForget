@@ -14,8 +14,10 @@ const getKeyBuffer = () => {
     return Buffer.from(raw, 'hex');
   }
 
-  // Derive fixed-size key from arbitrary passphrase.
-  return crypto.createHash('sha256').update(raw).digest();
+  // Derive fixed-size key from arbitrary passphrase using scrypt (memory-hard KDF).
+  // NOTE: changing this derivation is a breaking change for any data encrypted with a
+  // passphrase key. Users must re-save API credentials after upgrading.
+  return crypto.scryptSync(raw, 'antiforget-aes-key-v1', 32);
 };
 
 export const encryptText = (plainText) => {

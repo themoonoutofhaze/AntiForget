@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { KeyRound, Moon, Save, Sun, Palette, CheckCircle2, HardDrive, Cloud, FolderOpen, Clock3, GraduationCap, Bot, ArrowUp, GripVertical, Plus, Trash2, ChevronDown } from 'lucide-react';
+import { KeyRound, Moon, Save, Sun, Palette, CheckCircle2, HardDrive, Cloud, FolderOpen, Clock3, GraduationCap, Bot, GripVertical, Plus, Trash2, ChevronDown } from 'lucide-react';
 import type { IconType } from 'react-icons';
 import * as SiIcons from 'react-icons/si';
 import { getStorage, updateStorage, type AiProvider } from '../../utils/storage';
@@ -44,15 +44,16 @@ const reconcilePriorityOrder = (priorityIds: string[], availableModels: Prioriti
     return next;
 };
 
-interface SortablePriorityRowProps {
+interface SortableModelRowProps {
     model: PrioritizedModelCandidate;
     index: number;
     providerLabel: string;
     providerBadge: React.ReactNode;
     isPriorityEnabled: boolean;
+    onDelete: (modelId: string) => void;
 }
 
-const SortablePriorityRow: React.FC<SortablePriorityRowProps> = ({ model, index, providerLabel, providerBadge, isPriorityEnabled }) => {
+const SortableModelRow: React.FC<SortableModelRowProps> = ({ model, index, providerLabel, providerBadge, isPriorityEnabled, onDelete }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
         id: model.id,
         disabled: !isPriorityEnabled,
@@ -81,17 +82,27 @@ const SortablePriorityRow: React.FC<SortablePriorityRowProps> = ({ model, index,
                     {model.reasoning ? ' • reasoning' : ''}
                 </p>
             </div>
-            <button
-                type="button"
-                className="priority-drag-handle"
-                aria-label={`Drag ${model.model} to reorder`}
-                disabled={!isPriorityEnabled}
-                {...attributes}
-                {...listeners}
-            >
-                <GripVertical className="w-4 h-4" />
-                Drag
-            </button>
+            <div className="flex items-center gap-1">
+                <button
+                    type="button"
+                    className="priority-drag-handle"
+                    aria-label={`Drag ${model.model} to reorder`}
+                    disabled={!isPriorityEnabled}
+                    {...attributes}
+                    {...listeners}
+                >
+                    <GripVertical className="w-4 h-4" />
+                    Drag
+                </button>
+                <button
+                    type="button"
+                    className="btn-secondary p-2"
+                    onClick={() => onDelete(model.id)}
+                    aria-label={`Remove ${model.model}`}
+                >
+                    <Trash2 className="w-3.5 h-3.5" />
+                </button>
+            </div>
         </div>
     );
 };
@@ -122,6 +133,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
         openrouter: 'xiaomi/mimo-v2-flash',
         gemini: 'gemini-2.5-flash',
         claude: 'claude-3-7-sonnet-latest',
+        puter: 'gpt-4o-mini',
     });
     const [apiTestState, setApiTestState] = useState<Record<AiProvider, 'idle' | 'testing' | 'success' | 'error'>>({
         openai: 'idle',
@@ -131,6 +143,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
         openrouter: 'idle',
         gemini: 'idle',
         claude: 'idle',
+        puter: 'idle',
     });
     const [apiTestMessage, setApiTestMessage] = useState<Record<AiProvider, string>>({
         openai: '',
@@ -140,6 +153,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
         openrouter: '',
         gemini: '',
         claude: '',
+        puter: '',
     });
     const [storageProvider, setStorageProvider] = useState<'local' | 'google-drive'>('local');
     const [driveConnected, setDriveConnected] = useState(false);
@@ -154,6 +168,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
         openrouter: false,
         gemini: false,
         claude: false,
+        puter: false,
     });
     const [newModelProvider, setNewModelProvider] = useState<ModelProvider>('groq');
     const [newModelName, setNewModelName] = useState('');
@@ -236,6 +251,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
         openrouter: openrouterKeyInput,
         gemini: geminiKeyInput,
         claude: claudeKeyInput,
+        puter: '',
     };
 
     const setKeyInputMap: Record<AiProvider, (value: string) => void> = {
@@ -246,6 +262,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
         openrouter: setOpenrouterKeyInput,
         gemini: setGeminiKeyInput,
         claude: setClaudeKeyInput,
+        puter: () => {},
     };
 
     const todayMinutesSpent = useMemo(() => Math.floor(revisionSecondsToday / 60), [revisionSecondsToday]);
@@ -283,6 +300,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                 openrouter: storage.aiModelOverrides.openrouter || 'xiaomi/mimo-v2-flash',
                 gemini: storage.aiModelOverrides.gemini || 'gemini-2.5-flash',
                 claude: storage.aiModelOverrides.claude || 'claude-3-7-sonnet-latest',
+                puter: 'gpt-4o-mini',
             });
 
             try {
@@ -297,6 +315,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                     openrouter: false,
                     gemini: false,
                     claude: false,
+                    puter: false,
                 });
             }
 
@@ -545,6 +564,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                 openrouter: openrouterKeyInput,
                 gemini: geminiKeyInput,
                 claude: claudeKeyInput,
+                puter: '',
             };
 
             const testResult = await testApiConnectivity(
@@ -885,7 +905,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                 </div>
 
                                 <div className="flex flex-wrap gap-2">
-                                    {(['openai', 'groq', 'mistral', 'nvidia', 'openrouter', 'gemini', 'claude'] as AiProvider[]).map((provider) => (
+                                    {(['openai', 'groq', 'mistral', 'nvidia', 'openrouter', 'gemini', 'claude', 'puter'] as AiProvider[]).map((provider) => (
                                         <button
                                             key={provider}
                                             type="button"
@@ -905,55 +925,86 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                     ))}
                                 </div>
 
-                                <div className="space-y-2">
-                                    <label htmlFor="active-provider-key-input" className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-                                        {providerLabelMap[activeKeyProvider]} API Key
-                                    </label>
-                                    <textarea
-                                        id="active-provider-key-input"
-                                        value={keyInputMap[activeKeyProvider]}
-                                        onChange={(e) => setKeyInputMap[activeKeyProvider](e.target.value)}
-                                        placeholder={savedKeyProviders[activeKeyProvider]
-                                            ? 'A key is already stored securely. Paste a new key only if you want to replace it.'
-                                            : `Paste your ${providerLabelMap[activeKeyProvider]} API key here...`}
-                                        className="textarea-field min-h-[90px] font-mono text-xs"
-                                        style={{ letterSpacing: '0.02em' }}
-                                    />
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <button
-                                            type="button"
-                                            className="btn-secondary text-xs"
-                                            onClick={() => handleTestProvider(activeKeyProvider)}
-                                            disabled={apiTestState[activeKeyProvider] === 'testing'}
-                                        >
-                                            {apiTestState[activeKeyProvider] === 'testing'
-                                                ? 'Testing…'
-                                                : `Test ${providerLabelMap[activeKeyProvider]} API`}
-                                        </button>
-                                        {savedKeyProviders[activeKeyProvider] && (
+                                {activeKeyProvider === 'puter' ? (
+                                    <div className="space-y-3">
+                                        <div className="rounded-xl p-3" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+                                            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                                                SDK status: {isPuterAvailable() ? 'Loaded' : 'Not loaded'}
+                                            </p>
+                                            <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                                                Puter provides free AI access without requiring an API key.
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
                                             <button
                                                 type="button"
                                                 className="btn-secondary text-xs"
-                                                onClick={() => handleRemoveSavedKey(activeKeyProvider)}
+                                                onClick={handleTestPuter}
+                                                disabled={puterState === 'testing'}
                                             >
-                                                Remove Saved Key
+                                                {puterState === 'testing' ? 'Testing Puter…' : 'Test Puter AI'}
                                             </button>
+                                        </div>
+                                        {puterMessage && (
+                                            <p
+                                                className="text-[11px]"
+                                                style={{ color: puterState === 'success' ? 'var(--accent-primary)' : '#ef4444' }}
+                                            >
+                                                {puterMessage}
+                                            </p>
                                         )}
                                     </div>
-                                    {savedKeyProviders[activeKeyProvider] && (
-                                        <p className="text-[11px]" style={{ color: 'var(--accent-primary)' }}>
-                                            Stored securely on server.
-                                        </p>
-                                    )}
-                                    {apiTestMessage[activeKeyProvider] && (
-                                        <p
-                                            className="text-[11px]"
-                                            style={{ color: apiTestState[activeKeyProvider] === 'success' ? 'var(--accent-primary)' : '#ef4444' }}
+                                ) : (
+                                    <div className="space-y-2">
+                                        <label htmlFor="active-provider-key-input" className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
+                                            {providerLabelMap[activeKeyProvider]} API Key
+                                        </label>
+                                        <textarea
+                                            id="active-provider-key-input"
+                                            value={keyInputMap[activeKeyProvider]}
+                                            onChange={(e) => setKeyInputMap[activeKeyProvider](e.target.value)}
+                                            placeholder={savedKeyProviders[activeKeyProvider]
+                                                ? 'A key is already stored securely. Paste a new key only if you want to replace it.'
+                                                : `Paste your ${providerLabelMap[activeKeyProvider]} API key here...`}
+                                            className="textarea-field min-h-[90px] font-mono text-xs"
+                                            style={{ letterSpacing: '0.02em' }}
+                                        />
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <button
+                                                type="button"
+                                                className="btn-secondary text-xs"
+                                                onClick={() => handleTestProvider(activeKeyProvider)}
+                                                disabled={apiTestState[activeKeyProvider] === 'testing'}
+                                            >
+                                                {apiTestState[activeKeyProvider] === 'testing'
+                                                    ? 'Testing…'
+                                                    : `Test ${providerLabelMap[activeKeyProvider]} API`}
+                                            </button>
+                                            {savedKeyProviders[activeKeyProvider] && (
+                                                <button
+                                                    type="button"
+                                                    className="btn-secondary text-xs"
+                                                    onClick={() => handleRemoveSavedKey(activeKeyProvider)}
+                                                >
+                                                    Remove Saved Key
+                                                </button>
+                                            )}
+                                        </div>
+                                        {savedKeyProviders[activeKeyProvider] && (
+                                            <p className="text-[11px]" style={{ color: 'var(--accent-primary)' }}>
+                                                Stored securely on server.
+                                            </p>
+                                        )}
+                                        {apiTestMessage[activeKeyProvider] && (
+                                            <p
+                                                className="text-[11px]"
+                                                style={{ color: apiTestState[activeKeyProvider] === 'success' ? 'var(--accent-primary)' : '#ef4444' }}
                                         >
-                                            {apiTestMessage[activeKeyProvider]}
-                                        </p>
-                                    )}
-                                </div>
+                                                {apiTestMessage[activeKeyProvider]}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
 
                                 <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
                                     Keys are encrypted at rest and used only by the server during AI requests.
@@ -962,8 +1013,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
 
                             <div className="rounded-xl p-4 space-y-4" style={subsectionPanelStyle}>
                                 <div className="flex items-center gap-2">
-                                    <Plus className="w-4 h-4" style={{ color: '#f59e0b' }} />
-                                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Custom Models</p>
+                                    <Bot className="w-4 h-4" style={{ color: '#f59e0b' }} />
+                                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>My Models</p>
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-[140px_1fr_auto] gap-2 items-end">
@@ -1017,61 +1068,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                     </p>
                                 )}
 
-                                {priorityModels.length === 0 ? (
-                                    <div className="rounded-xl p-3 text-xs" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}>
-                                        No custom models yet.
-                                    </div>
-                                ) : (
-                                    <div className="space-y-2">
-                                        {priorityModels.map((candidate) => (
-                                            <div
-                                                key={candidate.id}
-                                                className="rounded-xl px-3 py-2 flex items-center justify-between gap-3"
-                                                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}
-                                            >
-                                                <div className="min-w-0">
-                                                    <p className="text-xs font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
-                                                        {candidate.model}
-                                                    </p>
-                                                    <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                                                        <span className="inline-flex items-center gap-1.5">
-                                                            {renderProviderBadge(candidate.provider, 'w-3 h-3')}
-                                                            {providerLabelMap[candidate.provider]}
-                                                        </span>
-                                                        {candidate.reasoning ? ' • reasoning' : ''}
-                                                    </p>
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    className="btn-secondary p-2"
-                                                    onClick={() => handleDeleteCustomModel(candidate.id)}
-                                                    aria-label={`Remove ${candidate.model}`}
-                                                >
-                                                    <Trash2 className="w-3.5 h-3.5" />
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="rounded-xl p-4 space-y-4" style={subsectionPanelStyle}>
-                                <div className="flex items-center gap-2">
-                                    <ArrowUp className="w-4 h-4" style={{ color: '#f59e0b' }} />
-                                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Model Priority</p>
-                                </div>
-
                                 {priorityState === 'loading' && (
-                                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Loading your custom models…</p>
+                                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Loading your models…</p>
                                 )}
 
                                 {priorityState === 'error' && (
-                                    <p className="text-xs" style={{ color: '#ef4444' }}>{priorityMessage || 'Failed to load model priority.'}</p>
+                                    <p className="text-xs" style={{ color: '#ef4444' }}>{priorityMessage || 'Failed to load models.'}</p>
                                 )}
 
                                 {priorityState !== 'loading' && manualPriorityIds.length === 0 && (
                                     <div className="rounded-xl p-3 text-xs" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}>
-                                        Add at least one custom model first.
+                                        No models added yet. Add your first model above.
                                     </div>
                                 )}
 
@@ -1086,13 +1093,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                                     }
 
                                                     return (
-                                                        <SortablePriorityRow
+                                                        <SortableModelRow
                                                             key={candidate.id}
                                                             model={candidate}
                                                             index={index}
                                                             providerLabel={providerLabelMap[candidate.provider]}
                                                             providerBadge={renderProviderBadge(candidate.provider, 'w-3 h-3')}
                                                             isPriorityEnabled={candidate.provider === 'puter' ? isPuterAvailable() : savedKeyProviders[candidate.provider]}
+                                                            onDelete={handleDeleteCustomModel}
                                                         />
                                                     );
                                                 })}
@@ -1102,42 +1110,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                 )}
 
                                 <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                                    Save Settings to persist this per-user model priority order in the database.
+                                    Drag to reorder priority. Save Settings to persist changes.
                                 </p>
                             </div>
 
-                            <div className="rounded-xl p-4 space-y-4" style={subsectionPanelStyle}>
-                                <div className="flex items-center gap-2">
-                                    <Bot className="w-4 h-4" style={{ color: '#ec4899' }} />
-                                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Puter.js</p>
-                                </div>
-
-                                <div className="rounded-xl p-3" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
-                                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                                        SDK status: {isPuterAvailable() ? 'Loaded' : 'Not loaded'}
-                                    </p>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        className="btn-secondary text-xs"
-                                        onClick={handleTestPuter}
-                                        disabled={puterState === 'testing'}
-                                    >
-                                        {puterState === 'testing' ? 'Testing Puter…' : 'Test Puter AI'}
-                                    </button>
-                                </div>
-
-                                {puterMessage && (
-                                    <p
-                                        className="text-[11px]"
-                                        style={{ color: puterState === 'success' ? 'var(--accent-primary)' : '#ef4444' }}
-                                    >
-                                        {puterMessage}
-                                    </p>
-                                )}
-                            </div>
                         </div>
                     )}
                 </div>

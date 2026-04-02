@@ -5,6 +5,7 @@ import remarkMath from 'remark-math';
 import remarkBreaks from 'remark-breaks';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 
 interface RichTextMessageProps {
     text: string;
@@ -15,7 +16,7 @@ export const RichTextMessage: React.FC<RichTextMessageProps> = ({ text }) => {
         <div className="chat-rich">
             <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
-                rehypePlugins={[rehypeRaw, rehypeKatex]}
+                rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeKatex]}
             >
                 {text}
             </ReactMarkdown>

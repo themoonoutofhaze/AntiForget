@@ -1,23 +1,21 @@
-import { getCurrentUserId } from './userContext';
-import { getAuthToken } from './auth';
-
-const getAuthHeaders = (): HeadersInit => {
-    const token = getAuthToken();
-    return token ? { Authorization: `Bearer ${token}` } : {};
-};
-
 export const savePdfBlob = async (id: string, originalName: string, blob: Blob) => {
     const formData = new FormData();
-    formData.append('userId', getCurrentUserId());
     formData.append('topicId', id);
     formData.append('originalName', originalName);
     formData.append('file', blob, originalName);
 
     const res = await fetch('/api/app/files/upload', {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: formData,
     });
+
+    if (res.status === 401) {
+        const hadSession = !!localStorage.getItem('synapse_auth_user');
+        localStorage.removeItem('synapse_auth_user');
+        localStorage.removeItem('synapse_auth_token');
+        if (hadSession) window.location.reload();
+        throw new Error('Session expired. Please sign in again.');
+    }
 
     if (!res.ok) {
         const text = await res.text();
@@ -30,11 +28,17 @@ export const getPdfBlob = async (_id: string) => {
 };
 
 export const deletePdfBlob = async (id: string) => {
-    const userId = encodeURIComponent(getCurrentUserId());
-    const res = await fetch(`/api/app/files/${encodeURIComponent(id)}?userId=${userId}`, {
+    const res = await fetch(`/api/app/files/${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        headers: getAuthHeaders(),
     });
+
+    if (res.status === 401) {
+        const hadSession = !!localStorage.getItem('synapse_auth_user');
+        localStorage.removeItem('synapse_auth_user');
+        localStorage.removeItem('synapse_auth_token');
+        if (hadSession) window.location.reload();
+        throw new Error('Session expired. Please sign in again.');
+    }
 
     if (!res.ok) {
         const text = await res.text();

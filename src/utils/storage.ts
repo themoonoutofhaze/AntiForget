@@ -28,7 +28,7 @@ export interface FSRSRecord {
     state: 'New' | 'Learning' | 'Review' | 'Relearning';
 }
 
-export type AiProvider = 'openai' | 'groq' | 'mistral' | 'nvidia' | 'openrouter' | 'gemini' | 'claude';
+export type AiProvider = 'openai' | 'groq' | 'mistral' | 'nvidia' | 'openrouter' | 'gemini' | 'claude' | 'puter';
 
 export interface SynapseStorage {
     nodes: GraphNode[];

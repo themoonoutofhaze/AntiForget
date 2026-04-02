@@ -5,6 +5,7 @@ import { RichTextMessage } from '../ui/RichTextMessage';
 import { addRevisionSeconds, getTodaysReviews, processReview } from '../../utils/fsrs';
 import { getStorage, updateStorage, type AiProvider } from '../../utils/storage';
 import { calculateAverageScore, extractQuestionScores, generateTutorResponse, getApiCredentialStatus, getProviderLabel, saveApiCredential, type TutorTopicContext, type AiAttempt, type ModelProvider } from '../../utils/gemini';
+import { primePuterAuth } from '../../utils/puter';
 
 /* ──────────────────────────────────────────────────────────────
    Types
@@ -59,9 +60,30 @@ const parseResults = (text: string, userAnswers: string[], questions: QuizQuesti
     questions.forEach((q, i) => {
         const idx = q.index;
         const scoreMatch = cleanText.match(new RegExp(`Q${idx}\\s*Score\\s*:\\s*([0-4](?:\\.\\d+)?)`, 'i'));
-        const answerMatch = cleanText.match(new RegExp(`Q${idx}\\s*Correct Answer\\s*:\\s*([\\s\\S]*?)(?=Q[1-3]\\s*(?:Score|Correct)|$)`, 'i'));
         const score = scoreMatch ? parseFloat(scoreMatch[1]) : 0;
-        const correctAnswer = (answerMatch?.[1] || '').trim();
+
+        let correctAnswer = '';
+        const allPatterns = [
+            // Pattern with Q prefix and "Correct Answer"
+            new RegExp(`Q${idx}\\s*Correct\\s*Answer\\s*:\\s*([\\s\\S]*?)(?=Q[1-3]\\s*(?:Score|Correct\\s*Answer|Answer)\\s*:|$)`, 'i'),
+            // Pattern with Q prefix and just "Answer"
+            new RegExp(`Q${idx}\\s*Answer\\s*:\\s*([\\s\\S]*?)(?=Q[1-3]\\s*(?:Score|Correct\\s*Answer|Answer)\\s*:|$)`, 'i'),
+            // Pattern without Q prefix - "Correct Answer" right after score
+            new RegExp(`Q${idx}[^\\n]*\\n\\s*Correct\\s*Answer\\s*:\\s*([\\s\\S]*?)(?=Q[1-3]\\s*(?:Score|Correct\\s*Answer|Answer)\\s*:|$)`, 'i'),
+            // Standalone "Correct Answer" anywhere in text for this question
+            new RegExp(`Q${idx}[^\\n]*?(?:Score[^\\n]*\\n)?[^\\n]*Correct\\s*Answer\\s*:\\s*([\\s\\S]*?)(?=Q[1-3]\\s*(?:Score|Correct\\s*Answer|Answer)\\s*:|$)`, 'i'),
+            // Fallback: look for "Correct Answer" on its own line after Q{idx} mention
+            new RegExp(`(?:Q${idx}[^\\n]*\\n)\\s*Correct\\s*Answer\\s*:\\s*([\\s\\S]*?)(?=Q[1-3]|$)`, 'i'),
+        ];
+
+        for (const pattern of allPatterns) {
+            const matchedAnswer = cleanText.match(pattern)?.[1]?.trim();
+            if (matchedAnswer && matchedAnswer.length > 0) {
+                correctAnswer = matchedAnswer;
+                break;
+            }
+        }
+
         results.push({ index: idx, score, correctAnswer, userAnswer: userAnswers[i] || '' });
     });
     return results;
@@ -292,6 +314,8 @@ export const SocraticArena: React.FC = () => {
 
     /* ── Start quiz ── */
     const startQuiz = async (unrecorded = false) => {
+        primePuterAuth();
+
         let nextId: string | null = null;
         if (unrecorded) {
             const storage = await getStorage();
@@ -687,18 +711,11 @@ export const SocraticArena: React.FC = () => {
                         <div className="space-y-2 min-w-0">
                             <span className="section-eyebrow">Knowledge Check</span>
                             <h2 className="section-title text-2xl mt-0.5">
-                                Answer each question below {isUnrecorded && <span className="text-sm font-normal ml-2 opacity-60">(Practice Mode)</span>}
+                                <span className="text-base font-normal" style={{ color: 'var(--accent-primary)' }}>Revising</span>{' '}{currentTopicName || 'Unknown Topic'} {isUnrecorded && <span className="text-sm font-normal ml-2 opacity-60">(Practice Mode)</span>}
                             </h2>
                             <div className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-                                {currentTopicName ? (
-                                    <span>
-                                        Topic: <span style={{ color: 'var(--text-primary)' }}>{currentTopicName}</span>
-                                    </span>
-                                ) : null}
                                 {questionGenerationMs !== null && (
                                     <span>
-                                        {currentTopicName ? ' • ' : ''}
-                                        <br />
                                         <span style={{ color: 'var(--accent-primary)' }}>✓</span>{' '}
                                         Questions generated in <span style={{ color: 'var(--accent-primary)' }}>{(questionGenerationMs / 1000).toFixed(2)}s</span>
                                         {activeModelInfo?.model ? (
@@ -806,7 +823,7 @@ export const SocraticArena: React.FC = () => {
         return (
             <div className="animate-slide-up w-full space-y-6 pb-8">
                 {/* Result banner */}
-                <div className="quiz-result-banner glass-card max-w-2xl mx-auto p-6 text-center space-y-2">
+                <div className="quiz-result-banner glass-card max-w-4xl mx-auto p-6 text-center space-y-2">
                     <div className="text-4xl">{overallEmoji}</div>
                     <h2 className="section-title text-xl">{overallMessage}</h2>
                     {averageScore !== null && (
@@ -825,7 +842,7 @@ export const SocraticArena: React.FC = () => {
                 </div>
 
                 {/* Per-question results */}
-                <div className="space-y-4 max-w-2xl mx-auto">
+                <div className="space-y-4 max-w-4xl mx-auto">
                     {results.map((r) => {
                         const q = questions.find((q) => q.index === r.index);
                         return (
@@ -854,23 +871,25 @@ export const SocraticArena: React.FC = () => {
                                 )}
 
                                 {/* Correct answer */}
-                                {r.correctAnswer && (
-                                    <div className="quiz-correct-answer">
-                                        <div className="flex items-center gap-1.5 mb-1">
-                                            <CheckCircle2 className="w-3.5 h-3.5" style={{ color: '#10b981' }} />
-                                            <span className="quiz-answer-review-label" style={{ color: '#10b981' }}>Model answer</span>
-                                        </div>
-                                        <div className="quiz-correct-text">
-                                            <RichTextMessage text={r.correctAnswer} />
-                                        </div>
+                                <div className="quiz-correct-answer">
+                                    <div className="flex items-center gap-1.5 mb-1">
+                                        <CheckCircle2 className="w-3.5 h-3.5" style={{ color: '#10b981' }} />
+                                        <span className="quiz-answer-review-label" style={{ color: '#10b981' }}>Correct answer</span>
                                     </div>
-                                )}
+                                    <div className="quiz-correct-text">
+                                        {r.correctAnswer ? (
+                                            <RichTextMessage text={r.correctAnswer} />
+                                        ) : (
+                                            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No correct answer was returned for this question.</p>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                         );
                     })}
                 </div>
 
-                <div className="glass-card max-w-2xl mx-auto p-5 space-y-4">
+                <div className="glass-card max-w-4xl mx-auto p-5 space-y-4">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                         <div>
                             <h3 className="section-title text-lg">Need help with these answers?</h3>

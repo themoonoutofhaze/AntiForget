@@ -9,6 +9,7 @@ import {
     registerWithEmailPassword,
     registerPasskeyUser,
     signInWithEmailPassword,
+    verifyGoogleAccessTokenWithServer,
 } from '../../utils/auth';
 
 interface LoginScreenProps {
@@ -39,11 +40,8 @@ const GoogleSignInRow: React.FC<{
     const login = useGoogleLogin({
         onSuccess: async (tokenResponse) => {
             try {
-                const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-                    headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
-                });
-                const info = await res.json() as { sub: string; name: string; email: string; picture?: string };
-                onSuccess({ id: info.sub, name: info.name, email: info.email, avatarUrl: info.picture }, { keepToken: false });
+                const { user } = await verifyGoogleAccessTokenWithServer(tokenResponse.access_token);
+                onSuccess(user);
             } catch {
                 onError();
             }
