@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { DndContext, MouseSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { KeyRound, Moon, Save, Sun, Palette, CheckCircle2, HardDrive, Cloud, Clock3, GraduationCap, Bot, GripVertical, Plus, Trash2, ChevronDown, Loader2, Languages } from 'lucide-react';
@@ -124,7 +124,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
     const [revisionSecondsToday, setRevisionSecondsToday] = useState(0);
     const [studentEducationLevel, setStudentEducationLevel] = useState('high school');
     const [studentMajor, setStudentMajor] = useState('');
-    const [studentFocusTopic, setStudentFocusTopic] = useState('');
     const [aiLanguage, setAiLanguage] = useState('English');
     const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
     const [providerModels, setProviderModels] = useState<Record<AiProvider, string>>({
@@ -187,8 +186,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
     const latestPriorityIdsRef = useRef<string[]>([]);
 
     const sensors = useSensors(
-        useSensor(PointerSensor, {
+        useSensor(MouseSensor, {
             activationConstraint: { distance: 5 },
+        }),
+        useSensor(TouchSensor, {
+            activationConstraint: {
+                delay: 160,
+                tolerance: 8,
+            },
         })
     );
 
@@ -292,7 +297,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
             setRevisionSecondsToday(Math.max(0, storage.revisionSecondsToday || 0));
             setStudentEducationLevel((storage.studentEducationLevel || 'high school').trim() || 'high school');
             setStudentMajor(storage.studentMajor || '');
-            setStudentFocusTopic(storage.studentFocusTopic || '');
             setAiLanguage((storage.aiLanguage || 'English').trim() || 'English');
             setProviderModels({
                 openai: storage.aiModelOverrides.openai || 'gpt-oss-120b',
@@ -403,7 +407,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                 dailyRevisionMinutesLimit: clampDailyLimit(dailyRevisionMinutesLimit),
                 studentEducationLevel: studentEducationLevel.trim() || 'high school',
                 studentMajor: studentMajor.trim(),
-                studentFocusTopic: studentFocusTopic.trim(),
                 aiLanguage: aiLanguage.trim() || 'English',
             });
 
@@ -849,17 +852,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                     <label htmlFor="ai-language" className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
                                         AI Language
                                     </label>
-                                    <div className="relative">
+                                    <div className="flex items-center gap-2">
                                         <Languages
-                                            className="w-4 h-4"
-                                            style={{ color: 'var(--text-muted)', position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
+                                            className="w-4 h-4 shrink-0"
+                                            style={{ color: 'var(--text-muted)' }}
                                         />
                                         <select
                                             id="ai-language"
                                             value={aiLanguage}
                                             onChange={(e) => setAiLanguage(e.target.value)}
                                             className="input-field"
-                                            style={{ paddingLeft: 36 }}
+                                            style={{ flex: 1 }}
                                         >
                                             {['English', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Arabic', 'Turkish', 'Persian', 'Hindi', 'Japanese', 'Korean', 'Chinese (Simplified)'].map((lang) => (
                                                 <option key={lang} value={lang}>{lang}</option>
@@ -946,19 +949,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                         onChange={(e) => setStudentMajor(e.target.value)}
                                         placeholder="Computer Science, Physics, Medicine..."
                                         className="input-field"
-                                    />
-                                </div>
-
-                                <div className="space-y-2">
-                                    <label htmlFor="student-focus-topic" className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-                                        Current Focus Topic
-                                    </label>
-                                    <textarea
-                                        id="student-focus-topic"
-                                        value={studentFocusTopic}
-                                        onChange={(e) => setStudentFocusTopic(e.target.value)}
-                                        placeholder="What are you currently focusing on learning?"
-                                        className="textarea-field min-h-[88px]"
                                     />
                                 </div>
 
@@ -1206,7 +1196,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                 )}
 
                                 <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                                    Drag to reorder priority. Save Settings to persist changes.
+                                    Drag to reorder priority. On mobile, long-press the drag handle first. Save Settings to persist changes.
                                 </p>
                             </div>
 

@@ -103,6 +103,16 @@ export const isPuterAvailable = (): boolean => {
   return Boolean(puter?.ai?.chat);
 };
 
+export const hasActivePuterSession = async (): Promise<boolean> => {
+  const puter = getPuter();
+  const auth = puter?.auth;
+  if (!auth) {
+    return false;
+  }
+
+  return await isPuterSignedIn(auth);
+};
+
 export const puterChat = async (
   prompt: string,
   options?: Record<string, unknown>,

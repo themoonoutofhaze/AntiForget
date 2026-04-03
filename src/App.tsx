@@ -345,6 +345,12 @@ function App() {
     const [completedRevisions, setCompletedRevisions] = useState(0);
     const [dailyGoal, setDailyGoal] = useState(3);
     const [currentView, setCurrentView] = useState<View>('home');
+    const [isMobileViewport, setIsMobileViewport] = useState(() => {
+        if (typeof window === 'undefined') {
+            return false;
+        }
+        return window.matchMedia('(max-width: 1024px)').matches;
+    });
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isSidebarFolded, setIsSidebarFolded] = useState(false);
     const [isTopicModeActive, setIsTopicModeActive] = useState(false);
@@ -374,6 +380,33 @@ function App() {
     const isArenaSetupReady = setupChecklist.hasAnyApiKey || setupChecklist.hasPuterModel;
 
     const theme: Theme = themeMode === 'auto' ? getThemeFromTime(new Date(timeTick)) : themeMode;
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        const mediaQuery = window.matchMedia('(max-width: 1024px)');
+        const handleViewportChange = (event: MediaQueryListEvent) => {
+            setIsMobileViewport(event.matches);
+            if (!event.matches) {
+                setIsSidebarOpen(false);
+            }
+        };
+
+        setIsMobileViewport(mediaQuery.matches);
+        mediaQuery.addEventListener('change', handleViewportChange);
+
+        return () => {
+            mediaQuery.removeEventListener('change', handleViewportChange);
+        };
+    }, []);
+
+    useEffect(() => {
+        if (isMobileViewport && isSidebarFolded) {
+            setIsSidebarFolded(false);
+        }
+    }, [isMobileViewport, isSidebarFolded]);
 
     useEffect(() => {
         if (themeMode !== 'auto') {
@@ -562,8 +595,8 @@ function App() {
                     <Sidebar
                         currentView={currentView}
                         onNavigate={handleNavigate}
-                        isFolded={isSidebarFolded}
-                        onToggleFold={() => setIsSidebarFolded(!isSidebarFolded)}
+                        isFolded={!isMobileViewport && isSidebarFolded}
+                        onToggleFold={() => setIsSidebarFolded((prev) => !prev)}
                     />
                 }
             >

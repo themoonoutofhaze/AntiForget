@@ -2491,9 +2491,6 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
       const studentMajor = typeof topicContext?.studentMajor === 'string' && topicContext.studentMajor.trim()
         ? topicContext.studentMajor.trim()
         : 'not specified';
-      const studentFocus = typeof topicContext?.studentFocusTopic === 'string' && topicContext.studentFocusTopic.trim()
-        ? topicContext.studentFocusTopic.trim()
-        : 'not specified';
       const weakHistory = Array.isArray(topicContext?.missedQuestionHistory)
         ? topicContext.missedQuestionHistory.filter((item) => typeof item === 'string' && item.trim()).slice(0, 5)
         : [];
@@ -2531,7 +2528,6 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
         attachmentPromptContext,
         `Student level: ${studentLevel}`,
         `Student major: ${studentMajor}`,
-        `Student focus topic: ${studentFocus}`,
         '',
         weakHistory.length > 0
           ? `Previously wrong questions to revisit:\n${weakHistory.map((q, i) => `${i + 1}. ${q}`).join('\n')}`

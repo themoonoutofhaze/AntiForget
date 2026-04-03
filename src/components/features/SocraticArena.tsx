@@ -5,7 +5,6 @@ import { RichTextMessage } from '../ui/RichTextMessage';
 import { addRevisionSeconds, getTodaysReviews, processReview } from '../../utils/fsrs';
 import { getStorage, updateStorage, type AiProvider } from '../../utils/storage';
 import { calculateAverageScore, extractQuestionScores, generateTutorResponse, getApiCredentialStatus, getProviderLabel, getUserModels, saveApiCredential, type TutorTopicContext, type AiAttempt, type ModelProvider } from '../../utils/gemini';
-import { primePuterAuth } from '../../utils/puter';
 
 /* ──────────────────────────────────────────────────────────────
    Types
@@ -296,7 +295,6 @@ export const SocraticArena: React.FC = () => {
             hasAttachedFile: Boolean(node?.hasPdfBlob),
             studentLevel: (storage.studentEducationLevel || 'high school').trim() || 'high school',
             studentMajor: (storage.studentMajor || '').trim(),
-            studentFocusTopic: (storage.studentFocusTopic || '').trim(),
             aiLanguage: (storage.aiLanguage || 'English').trim() || 'English',
             missedQuestionHistory: storage.missedQuestionHistoryByTopic[topicId] || [],
         };
@@ -331,8 +329,6 @@ export const SocraticArena: React.FC = () => {
 
     /* ── Start quiz ── */
     const startQuiz = async (unrecorded = false, dueNodeOverride?: string[]) => {
-        primePuterAuth();
-
         let nextId: string | null = null;
         if (unrecorded) {
             const storage = await getStorage();

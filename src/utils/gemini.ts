@@ -1,6 +1,6 @@
 import { getStorage, type AiProvider } from './storage';
 import { apiDelete, apiGet, apiPost, apiPut } from './api/client';
-import { isPuterAvailable, puterChat } from './puter';
+import { hasActivePuterSession, isPuterAvailable, puterChat } from './puter';
 
 export type ModelProvider = AiProvider | 'puter';
 
@@ -81,7 +81,6 @@ export interface TutorTopicContext {
     hasAttachedFile?: boolean;
     studentLevel: string;
     studentMajor: string;
-    studentFocusTopic: string;
     aiLanguage?: string;
     missedQuestionHistory: string[];
 }
@@ -163,9 +162,6 @@ const buildTutorPrompt = (
         const studentMajor = typeof topicContext?.studentMajor === 'string' && topicContext.studentMajor.trim()
             ? topicContext.studentMajor.trim()
             : 'not specified';
-        const studentFocus = typeof topicContext?.studentFocusTopic === 'string' && topicContext.studentFocusTopic.trim()
-            ? topicContext.studentFocusTopic.trim()
-            : 'not specified';
         const weakHistory = Array.isArray(topicContext?.missedQuestionHistory)
             ? topicContext.missedQuestionHistory.filter((item) => typeof item === 'string' && item.trim()).slice(0, 5)
             : [];
@@ -180,7 +176,6 @@ const buildTutorPrompt = (
             `Topic summary: ${summaryContent}`,
             `Student level: ${studentLevel}`,
             `Student major: ${studentMajor}`,
-            `Student focus topic: ${studentFocus}`,
             '',
             weakHistory.length > 0
                 ? `Previously wrong questions to revisit:\n${weakHistory.map((q, i) => `${i + 1}. ${q}`).join('\n')}`
@@ -252,7 +247,12 @@ export const generateTutorResponse = async (
     try {
         const puterPrimary = await getPuterPrimaryModel();
         const shouldBypassPuter = resolvedMode === 'questions' && Boolean(topicContext?.hasAttachedFile);
-        if (puterPrimary && isPuterAvailable() && !shouldBypassPuter) {
+        const canUsePuter = puterPrimary
+            && isPuterAvailable()
+            && !shouldBypassPuter
+            && await hasActivePuterSession();
+
+        if (canUsePuter) {
             const startedAt = Date.now();
             const prompt = buildTutorPrompt(history, newPrompt, topicContext, resolvedMode, aiLanguage);
             const text = await puterChat(prompt, { model: puterPrimary.model });
