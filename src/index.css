@@ -440,7 +440,10 @@
 }
 
 .btn-primary:active {
-  transform: translateY(0) scale(0.98);
+  transform: translateY(0) scale(0.96);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+  filter: brightness(0.92);
+  transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.08s ease;
 }
 
 .btn-primary:disabled {
@@ -483,7 +486,9 @@
 }
 
 .btn-secondary:active {
-  transform: scale(0.98);
+  transform: scale(0.96);
+  filter: brightness(0.90);
+  transition: transform 0.08s ease, filter 0.08s ease;
 }
 
 .btn-secondary:disabled {
@@ -574,7 +579,9 @@
 }
 
 .btn-ghost:active {
-  transform: scale(0.95);
+  transform: scale(0.93);
+  filter: brightness(0.90);
+  transition: transform 0.08s ease, filter 0.08s ease;
 }
 
 /* ========================================
@@ -1335,13 +1342,17 @@
 
   /* Stronger active feedback on touch */
   .btn-primary:active {
-    transform: scale(0.96);
-    animation: touch-jiggle 220ms cubic-bezier(0.16, 1, 0.3, 1);
+    transform: scale(0.94);
+    filter: brightness(0.88);
+    box-shadow: 0 0 0 4px var(--accent-glow);
+    animation: btn-press-ripple 280ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .btn-secondary:active,
   .btn-ghost:active {
-    animation: touch-jiggle 220ms cubic-bezier(0.16, 1, 0.3, 1);
+    transform: scale(0.93);
+    filter: brightness(0.88);
+    animation: btn-press-ripple 280ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .nav-item:active,
@@ -2205,4 +2216,124 @@
 
 .page-nudge-scroll {
   animation: page-nudge-scroll 0.75s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+/* ========================================
+   BUTTON PRESS RIPPLE
+   ======================================== */
+
+@keyframes btn-press-ripple {
+  0%   { box-shadow: 0 0 0 0 var(--accent-glow); }
+  40%  { box-shadow: 0 0 0 6px var(--accent-glow); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* Generic active press for any button (even raw <button> without .btn-*) */
+button:not(:disabled):active,
+[role='button']:not([aria-disabled='true']):active {
+  transition: transform 0.08s ease, filter 0.08s ease !important;
+}
+
+/* ========================================
+   QUIZ — TOP BAR (mobile-first two-row header)
+   ======================================== */
+
+.quiz-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.quiz-top-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quiz-top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* Exit button — minimum tap target */
+.quiz-exit-btn {
+  min-height: 44px;
+  min-width: 64px;
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  .quiz-exit-btn {
+    min-height: 52px;
+    min-width: 72px;
+    font-size: 1rem;
+  }
+}
+
+/* ========================================
+   GLOBAL BTN DISABLED OVERLAY DURING AI FETCH
+   ======================================== */
+
+/* When body has data-ai-loading, blur the page slightly */
+body[data-ai-loading='true'] .glass-card {
+  pointer-events: none;
+}
+
+/* Loading screen blur overlay */
+.ai-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 11, 20, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: overlay-fade-in 0.22s ease both;
+}
+
+.dark .ai-loading-overlay {
+  background: rgba(2, 4, 10, 0.65);
+}
+
+@keyframes overlay-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.ai-loading-spinner-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 28px 36px;
+  border-radius: 20px;
+  background: var(--bg-surface-raised);
+  border: 1px solid var(--border-default);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.35);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  animation: overlay-fade-in 0.25s ease 0.05s both;
+}
+
+.ai-loading-ring {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 3px solid var(--border-default);
+  border-top-color: var(--accent-primary);
+  animation: quiz-spin 0.75s linear infinite;
+}
+
+.ai-loading-text {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-align: center;
+  margin: 0;
 }

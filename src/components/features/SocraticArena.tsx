@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Target, KeyRound, CheckCircle2, ChevronRight, BookOpen, Star, Smile, AlertCircle, Loader2, MessageCircle } from 'lucide-react';
+import { Send, Target, KeyRound, CheckCircle2, ChevronRight, BookOpen, Star, Smile, AlertCircle, MessageCircle } from 'lucide-react';
 import { Timer } from '../ui/Timer';
 import { RichTextMessage } from '../ui/RichTextMessage';
 import { addRevisionSeconds, getTodaysReviews, processReview } from '../../utils/fsrs';
@@ -146,11 +146,37 @@ export const SocraticArena: React.FC = () => {
     const [isChatSending, setIsChatSending] = useState(false);
     const [chatError, setChatError] = useState<string | null>(null);
 
+    /* Lobby swipe physics */
+    const lobbyRef = useRef<HTMLDivElement>(null);
+    const swipeStartY = useRef<number | null>(null);
+    const swipeStartX = useRef<number | null>(null);
+    const swipeAnimFrame = useRef<number | null>(null);
+
+    const applyLobbyTransform = (dy: number, dx: number) => {
+        const el = lobbyRef.current;
+        if (!el) return;
+        const maxTilt = 6; // degrees
+        const maxShift = 18; // px
+        const tiltX = Math.max(-maxTilt, Math.min(maxTilt, -dy / 12));
+        const tiltY = Math.max(-maxTilt, Math.min(maxTilt, dx / 12));
+        const shiftY = Math.max(-maxShift, Math.min(maxShift, dy * 0.35));
+        el.style.transition = 'none';
+        el.style.transform = `perspective(800px) rotateX(${tiltX}deg) rotateY(${tiltY}deg) translateY(${shiftY}px)`;
+    };
+
+    const resetLobbyTransform = () => {
+        const el = lobbyRef.current;
+        if (!el) return;
+        el.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1)';
+        el.style.transform = 'perspective(800px) rotateX(0deg) rotateY(0deg) translateY(0px)';
+    };
+
     const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
     const [timeBudgetReached, setTimeBudgetReached] = useState(false);
     const [sessionMinutesLimit, setSessionMinutesLimit] = useState(60);
     const [isTimerActive, setIsTimerActive] = useState(false);
     const [isUnrecorded, setIsUnrecorded] = useState(false);
+    const [isStarting, setIsStarting] = useState(false);
 
     const activeRequestRef = useRef<AbortController | null>(null);
     const providerLabel = getProviderLabel(provider);
@@ -329,17 +355,18 @@ export const SocraticArena: React.FC = () => {
 
     /* ── Start quiz ── */
     const startQuiz = async (unrecorded = false, dueNodeOverride?: string[]) => {
+        setIsStarting(true);
         let nextId: string | null = null;
         if (unrecorded) {
             const storage = await getStorage();
-            if (storage.nodes.length === 0) return; // no topics to practice
+            if (storage.nodes.length === 0) { setIsStarting(false); return; } // no topics to practice
             nextId = storage.nodes[Math.floor(Math.random() * storage.nodes.length)].id;
         } else {
             const dueQueue = dueNodeOverride || dueNodes;
-            if (dueQueue.length === 0) return;
+            if (dueQueue.length === 0) { setIsStarting(false); return; }
             nextId = dueQueue[0];
         }
-        if (!nextId) return;
+        if (!nextId) { setIsStarting(false); return; }
 
         setCurrentNodeId(nextId);
         setIsUnrecorded(unrecorded);
@@ -389,6 +416,7 @@ export const SocraticArena: React.FC = () => {
             setPhase('lobby');
         } finally {
             if (activeRequestRef.current === controller) activeRequestRef.current = null;
+            setIsStarting(false);
         }
     };
 
@@ -599,8 +627,33 @@ export const SocraticArena: React.FC = () => {
        RENDER — Lobby
     ══════════════════════════════════════════════════════════ */
     if (phase === 'lobby') {
+        const onTouchStart = (e: React.TouchEvent) => {
+            swipeStartY.current = e.touches[0].clientY;
+            swipeStartX.current = e.touches[0].clientX;
+        };
+        const onTouchMove = (e: React.TouchEvent) => {
+            if (swipeStartY.current === null || swipeStartX.current === null) return;
+            const dy = e.touches[0].clientY - swipeStartY.current;
+            const dx = e.touches[0].clientX - swipeStartX.current;
+            if (swipeAnimFrame.current !== null) cancelAnimationFrame(swipeAnimFrame.current);
+            swipeAnimFrame.current = requestAnimationFrame(() => applyLobbyTransform(dy, dx));
+        };
+        const onTouchEnd = () => {
+            swipeStartY.current = null;
+            swipeStartX.current = null;
+            if (swipeAnimFrame.current !== null) cancelAnimationFrame(swipeAnimFrame.current);
+            resetLobbyTransform();
+        };
+
         return (
-            <div className="animate-slide-up w-full space-y-6 socratic-liveness-hint">
+            <div
+                ref={lobbyRef}
+                className="animate-slide-up w-full space-y-6 socratic-liveness-hint"
+                onTouchStart={onTouchStart}
+                onTouchMove={onTouchMove}
+                onTouchEnd={onTouchEnd}
+                style={{ willChange: 'transform', transformStyle: 'preserve-3d' }}
+            >
                 {/* Friendly banner */}
               
 
@@ -682,12 +735,17 @@ export const SocraticArena: React.FC = () => {
                                 <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
                                     <button id="start-session-btn" onClick={() => startQuiz(false)}
                                         className="btn-primary gap-2 flex-1"
+                                        disabled={isStarting}
                                         style={{ minWidth: 220 }}>
-                                        <Target className="w-4 h-4" />
-                                        Start Review ({sessionMinutesLimit} min limit)
+                                        {isStarting ? (
+                                            <><div className="quiz-btn-spinner" /> Preparing…</>
+                                        ) : (
+                                            <><Target className="w-4 h-4" /> Start Review ({sessionMinutesLimit} min limit)</>
+                                        )}
                                     </button>
                                     <button id="start-unrecorded-btn" onClick={() => startQuiz(true)}
                                         className="btn-secondary gap-2 flex-1"
+                                        disabled={isStarting}
                                         style={{ minWidth: 220, background: 'transparent', borderColor: 'var(--border-default)' }}>
                                         <Smile className="w-4 h-4" />
                                         Practice Mode (Unrecorded)
@@ -727,38 +785,19 @@ export const SocraticArena: React.FC = () => {
     ══════════════════════════════════════════════════════════ */
     if (phase === 'loading') {
         return (
-            <div className="animate-slide-up w-full space-y-6">
-                <div className="glass-card w-full overflow-hidden flex flex-col items-center justify-center min-h-[400px]">
-                    <div className="relative p-10 text-center space-y-6 w-full max-w-2xl relative overflow-hidden">
-                        <div className="flex flex-col items-center gap-4 relative z-10">
-                            <div className="relative">
-                                <Loader2 className="w-12 h-12 animate-spin" style={{ color: 'var(--accent-primary)' }} />
-                                <div className="absolute inset-0 flex items-center justify-center animate-pulse">
-                                    <div className="w-3 h-3 rounded-full bg-emerald-400" />
-                                </div>
-                            </div>
-                            <div>
-                                <p className="text-xl font-bold font-display tracking-tight" style={{ color: 'var(--text-primary)' }}>
-                                    Synthesizing Questions…
-                                </p>
-                                <p className="text-sm mt-1 opacity-60" style={{ color: 'var(--text-muted)' }}>
-                                    Scanning model priority queue for optimal reasoning capacity
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="pt-2 px-10">
-                            <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
-                                <div className="h-full bg-emerald-500/40 transition-all duration-1000 w-1/3 animate-ping" />
-                            </div>
-                        </div>
-
-                        <p className="text-[10px] uppercase tracking-widest opacity-20 font-bold" style={{ color: 'var(--text-muted)' }}>
-                            AntiForget Autoscale Fallback Protocol v2.4
-                        </p>
+            <>
+                {/* Lobby content is still visible blurred behind the overlay */}
+                <div className="animate-slide-up w-full space-y-6" aria-hidden="true" style={{ opacity: 0.35, pointerEvents: 'none', filter: 'blur(2px)' }}>
+                    <div className="glass-card w-full overflow-hidden flex flex-col items-center justify-center min-h-[300px]" />
+                </div>
+                <div className="ai-loading-overlay" role="status" aria-live="polite">
+                    <div className="ai-loading-spinner-card">
+                        <div className="ai-loading-ring" />
+                        <p className="ai-loading-text">Synthesizing Questions…</p>
+                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>Hold tight, this takes a few seconds</p>
                     </div>
                 </div>
-            </div>
+            </>
         );
     }
 
@@ -770,37 +809,52 @@ export const SocraticArena: React.FC = () => {
         const allFilled = answers.every((a) => a.trim().length > 0);
 
         return (
+            <>
+                {/* Blur overlay during grading */}
+                {isSubmitting && (
+                    <div className="ai-loading-overlay" role="status" aria-live="polite">
+                        <div className="ai-loading-spinner-card">
+                            <div className="ai-loading-ring" />
+                            <p className="ai-loading-text">Grading your answers…</p>
+                            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>Almost there!</p>
+                        </div>
+                    </div>
+                )}
             <div className="animate-slide-up w-full space-y-6 pb-8">
                 <div className="glass-card w-full overflow-hidden px-4 py-6 md:px-10 md:py-10 space-y-6 md:space-y-8">
-                    {/* Header */}
+                    {/* Header — two-row on mobile, single row on desktop */}
                     <div className="max-w-4xl mx-auto w-full">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="space-y-1 min-w-0 flex-1">
+                        {/* Row 1 (mobile): Timer + Exit pill — pinned at top, always visible */}
+                        <div className="quiz-top-bar">
+                            <div className="quiz-top-bar-left">
                                 <span className="section-eyebrow">Knowledge Check</span>
-                                <h2 className="section-title text-xl md:text-2xl mt-0.5 leading-tight">
-                                    <span className="font-normal" style={{ color: 'var(--accent-primary)' }}>Revising</span>{' '}{currentTopicName || 'Unknown Topic'} {isUnrecorded && <span className="text-sm font-normal ml-2 opacity-60">(Practice Mode)</span>}
-                                </h2>
-                                <div className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-                                    {questionGenerationMs !== null && (
-                                        <span>
-                                            <span style={{ color: 'var(--accent-primary)' }}>✓</span>{' '}
-                                            Generated in <span style={{ color: 'var(--accent-primary)' }}>{(questionGenerationMs / 1000).toFixed(2)}s</span>
-                                            {activeModelInfo?.model ? (
-                                                <span> · <span style={{ color: 'var(--text-primary)' }}>{activeModelInfo.model}</span></span>
-                                            ) : null}
-                                        </span>
-                                    )}
-                                </div>
                             </div>
-                            <div className="flex items-center gap-2 flex-shrink-0">
+                            <div className="quiz-top-bar-right">
                                 {isTimerActive && (
                                     <Timer initialSeconds={sessionMinutesLimit * 60} isActive={isTimerActive} onComplete={handleTimeUp} />
                                 )}
                                 <button id="close-quiz-btn" onClick={resetToLobby}
-                                    className="font-semibold rounded-xl border"
+                                    className="font-semibold rounded-xl border quiz-exit-btn"
                                     style={{ borderColor: 'rgba(220,38,38,0.34)', color: '#dc2626', background: 'rgba(220,38,38,0.12)', padding: '10px 18px' }}>
                                     Exit
                                 </button>
+                            </div>
+                        </div>
+                        {/* Row 2: Topic title */}
+                        <div className="mt-3">
+                            <h2 className="section-title text-xl md:text-2xl leading-tight">
+                                <span className="font-normal" style={{ color: 'var(--accent-primary)' }}>Revising</span>{' '}{currentTopicName || 'Unknown Topic'}{isUnrecorded && <span className="text-sm font-normal ml-2 opacity-60">(Practice Mode)</span>}
+                            </h2>
+                            <div className="text-xs font-semibold mt-1" style={{ color: 'var(--text-secondary)' }}>
+                                {questionGenerationMs !== null && (
+                                    <span>
+                                        <span style={{ color: 'var(--accent-primary)' }}>✓</span>{' '}
+                                        Generated in <span style={{ color: 'var(--accent-primary)' }}>{(questionGenerationMs / 1000).toFixed(2)}s</span>
+                                        {activeModelInfo?.model ? (
+                                            <span> · <span style={{ color: 'var(--text-primary)' }}>{activeModelInfo.model}</span></span>
+                                        ) : null}
+                                    </span>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -877,6 +931,7 @@ export const SocraticArena: React.FC = () => {
                     </div>
                 </div>
             </div>
+            </>
         );
     }
 
@@ -1074,3 +1129,4 @@ export const SocraticArena: React.FC = () => {
 
     return null;
 };
+

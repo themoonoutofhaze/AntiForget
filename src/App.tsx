@@ -97,7 +97,8 @@ function SetupChecklistCard({
     const aiReady = setup.hasAnyApiKey || setup.hasPuterModel;
     const driveStepDone = setup.driveConnected || !setup.driveReady;
 
-    if (isDismissed || (!setup.isLoading && aiReady && driveStepDone)) {
+    // Hide while loading (invisible by default), hide if dismissed, hide if already set up.
+    if (setup.isLoading || isDismissed || (aiReady && driveStepDone)) {
         return null;
     }
 
