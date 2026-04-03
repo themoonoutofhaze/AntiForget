@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useGoogleLogin } from '@react-oauth/google';
 import { KeyRound, ShieldCheck, Sparkles, BookOpen, Network, Github, Eye, EyeOff } from 'lucide-react';
 import type { AuthUser } from '../../utils/auth';
@@ -108,6 +108,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ hasGoogleClientId, onL
     const [passkeyHovered, setPasskeyHovered] = useState(false);
     const [isGoogleLoading, setIsGoogleLoading] = useState(false);
     const [showMobileForm, setShowMobileForm] = useState(false);
+    const mobileHandleTouchStartY = useRef<number | null>(null);
 
     const passkeyAvailable = useMemo(() => isPasskeySupported(), []);
     const registeredPasskeyUsers = useMemo(() => getRegisteredPasskeyUsers(), []);
@@ -171,6 +172,21 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ hasGoogleClientId, onL
         } else {
             setShowPasskeyRegister((prev) => !prev);
             setAuthError(null);
+        }
+    };
+
+    const handleMobileHandleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+        mobileHandleTouchStartY.current = e.touches[0]?.clientY ?? null;
+    };
+
+    const handleMobileHandleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+        const startY = mobileHandleTouchStartY.current;
+        const endY = e.changedTouches[0]?.clientY;
+        mobileHandleTouchStartY.current = null;
+
+        if (startY == null || endY == null) return;
+        if (endY - startY > 24) {
+            setShowMobileForm(false);
         }
     };
 
@@ -398,6 +414,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ hasGoogleClientId, onL
                 <div 
                     className="md:hidden w-full flex justify-center py-4 cursor-pointer flex-shrink-0"
                     onClick={() => setShowMobileForm(false)}
+                    onTouchStart={handleMobileHandleTouchStart}
+                    onTouchEnd={handleMobileHandleTouchEnd}
                 >
                     <div className="w-12 h-1.5 rounded-full" style={{ background: 'var(--border-strong)' }} />
                 </div>
