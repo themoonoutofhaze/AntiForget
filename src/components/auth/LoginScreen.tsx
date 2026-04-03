@@ -107,6 +107,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ hasGoogleClientId, onL
     const [passkeyName, setPasskeyName] = useState('');
     const [passkeyHovered, setPasskeyHovered] = useState(false);
     const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+    const [showMobileForm, setShowMobileForm] = useState(false);
 
     const passkeyAvailable = useMemo(() => isPasskeySupported(), []);
     const registeredPasskeyUsers = useMemo(() => getRegisteredPasskeyUsers(), []);
@@ -174,14 +175,234 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ hasGoogleClientId, onL
     };
 
     return (
-        <div className="h-[100dvh] w-full flex flex-col lg:flex-row overflow-hidden">
+        <div className="h-[100dvh] w-full flex flex-col md:flex-row overflow-hidden relative">
 
-            {/* ─── LEFT PANEL: Form ─── */}
+            {/* ─── RIGHT PANEL: Decorative (Background on Mobile) ─── */}
             <div
-                className="relative flex flex-col w-full lg:w-1/2 flex-1 lg:flex-none overflow-y-auto scrollbar-on-intent"
-                style={{ background: 'var(--bg-surface)' }}
+                className="flex flex-col w-full md:w-1/2 flex-shrink-0 absolute inset-0 md:relative z-0 overflow-hidden order-first md:order-none"
+                style={{
+                    background: 'linear-gradient(145deg, #1d4ed8 0%, #0f9e8c 45%, #16a34a 100%)',
+                }}
             >
-                <div className="relative z-10 flex flex-col flex-1 px-8 sm:px-10 py-6 w-full max-w-[500px] mx-auto">
+                {/* Subtle dot-grid overlay */}
+                <div
+                    className="absolute inset-0 pointer-events-none"
+                    style={{
+                        backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.08) 1px, transparent 1px)',
+                        backgroundSize: '28px 28px',
+                    }}
+                />
+
+                {/* Glow orbs */}
+                <div className="absolute pointer-events-none" style={{ top: '10%', right: '15%', width: '260px', height: '260px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,255,255,0.22) 0%, transparent 70%)' }} />
+                <div className="absolute pointer-events-none" style={{ bottom: '12%', left: '10%', width: '200px', height: '200px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(20,184,166,0.40) 0%, transparent 70%)' }} />
+                <div className="absolute pointer-events-none" style={{ top: '55%', right: '5%', width: '140px', height: '140px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(34,197,94,0.35) 0%, transparent 70%)' }} />
+
+                {/* Decorative rings */}
+                <div className="absolute pointer-events-none" style={{ top: '-60px', right: '-60px', width: '320px', height: '320px', borderRadius: '50%', border: '1px solid rgba(255,255,255,0.07)' }} />
+                <div className="absolute pointer-events-none" style={{ top: '-20px', right: '-20px', width: '220px', height: '220px', borderRadius: '50%', border: '1px solid rgba(255,255,255,0.06)' }} />
+                <div className="absolute pointer-events-none" style={{ bottom: '-80px', left: '-80px', width: '380px', height: '380px', borderRadius: '50%', border: '1px solid rgba(255,255,255,0.05)' }} />
+
+                {/* Content */}
+                <div 
+                    className={`relative z-10 flex flex-col items-center md:items-start min-h-0 px-6 md:px-14 md:py-16 transition-all duration-[1000ms] ease-[cubic-bezier(0.32,0.72,0,1)] w-full md:w-auto md:flex-1 md:justify-center ${
+                        showMobileForm ? 'justify-start h-auto' : 'justify-start pt-[26vh] flex-1 md:pt-16'
+                    }`}
+                >
+                    {/* --- DESKTOP LOGO --- */}
+                    <div className="hidden md:flex md:flex-row md:items-center md:gap-4 md:mb-8">
+                        <div
+                            className="w-16 h-16 rounded-3xl flex items-center justify-center flex-shrink-0"
+                            style={{
+                                background: 'rgba(255,255,255,0.15)',
+                                border: '1px solid rgba(255,255,255,0.25)',
+                                backdropFilter: 'blur(12px)',
+                            }}
+                        >
+                            <span
+                                aria-hidden="true"
+                                style={{
+                                    display: 'block',
+                                    background: '#ffffff',
+                                    maskImage: 'url(/icon.svg)',
+                                    maskRepeat: 'no-repeat',
+                                    maskPosition: 'center',
+                                    maskSize: 'contain',
+                                    WebkitMaskImage: 'url(/icon.svg)',
+                                    WebkitMaskRepeat: 'no-repeat',
+                                    WebkitMaskPosition: 'center',
+                                    WebkitMaskSize: 'contain',
+                                }}
+                                className="w-[36px] h-[36px]"
+                            />
+                        </div>
+                        <div className="flex flex-col whitespace-nowrap items-start w-auto">
+                            <p className="font-bold tracking-tight text-[18px]" style={{ fontFamily: 'Syne, sans-serif', color: '#ffffff', lineHeight: 1.2 }}>
+                                AntiForget
+                            </p>
+                            <p className="font-medium text-[12px] opacity-100 mt-0" style={{ color: 'rgba(255,255,255,0.7)' }}>
+                                Smart Revision System
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* --- MOBILE LOGOS --- */}
+                    <div 
+                        className={`block md:hidden relative w-full transition-all duration-[1000ms] ease-[cubic-bezier(0.32,0.72,0,1)] ${
+                            showMobileForm ? 'h-[60px] mt-[4vh] mb-0' : 'h-[160px] mt-0 mb-8'
+                        }`}
+                    >
+                        {/* Mobile Top Logo (Visible when form is open) */}
+                        <div 
+                            className={`absolute inset-0 flex items-center justify-center gap-3 transition-all ${
+                                showMobileForm 
+                                    ? 'duration-[700ms] delay-[300ms] ease-[cubic-bezier(0.32,0.72,0,1)] opacity-100 scale-100 pointer-events-auto' 
+                                    : 'duration-[400ms] ease-out opacity-0 scale-95 pointer-events-none'
+                            }`}
+                        >
+                            <div
+                                className="w-12 h-12 rounded-[19px] flex items-center justify-center flex-shrink-0 shadow-2xl"
+                                style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)', backdropFilter: 'blur(12px)' }}
+                            >
+                                <span className="w-[24px] h-[24px] block" style={{ background: '#ffffff', maskImage: 'url(/icon.svg)', maskRepeat: 'no-repeat', maskPosition: 'center', maskSize: 'contain', WebkitMaskImage: 'url(/icon.svg)', WebkitMaskRepeat: 'no-repeat', WebkitMaskPosition: 'center', WebkitMaskSize: 'contain' }} />
+                            </div>
+                            <div className="flex flex-col whitespace-nowrap items-start">
+                                <p className="font-bold tracking-tight text-[20px]" style={{ fontFamily: 'Syne, sans-serif', color: '#ffffff', lineHeight: 1.2 }}>
+                                    AntiForget
+                                </p>
+                                <p className="font-medium text-[11px] opacity-90 mt-0" style={{ color: 'rgba(255,255,255,0.7)' }}>
+                                    Smart Revision System
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Mobile Center Logo (Visible when form is closed) */}
+                        <div 
+                            className={`absolute inset-x-0 top-0 flex flex-col items-center gap-4 transition-all ${
+                                showMobileForm 
+                                    ? 'duration-[400ms] ease-out opacity-0 scale-[0.98] pointer-events-none' 
+                                    : 'duration-[700ms] delay-[300ms] ease-[cubic-bezier(0.32,0.72,0,1)] opacity-100 scale-100 pointer-events-auto'
+                            }`}
+                        >
+                            <div
+                                className="w-20 h-20 rounded-[2rem] flex items-center justify-center flex-shrink-0 shadow-2xl"
+                                style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)', backdropFilter: 'blur(12px)' }}
+                            >
+                                <span className="w-[42px] h-[42px] block" style={{ background: '#ffffff', maskImage: 'url(/icon.svg)', maskRepeat: 'no-repeat', maskPosition: 'center', maskSize: 'contain', WebkitMaskImage: 'url(/icon.svg)', WebkitMaskRepeat: 'no-repeat', WebkitMaskPosition: 'center', WebkitMaskSize: 'contain' }} />
+                            </div>
+                            <div className="flex flex-col whitespace-nowrap items-center">
+                                <p className="font-bold tracking-tight text-[28px]" style={{ fontFamily: 'Syne, sans-serif', color: '#ffffff', lineHeight: 1.2 }}>
+                                    AntiForget
+                                </p>
+                                <p className="font-medium text-[14px] opacity-100 mt-1" style={{ color: 'rgba(255,255,255,0.7)' }}>
+                                    Smart Revision System
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Mobile Landing Big Text */}
+                    <div 
+                        className={`md:hidden flex flex-col items-center flex-shrink-0 justify-center w-full transition-all text-center overflow-hidden ${
+                            showMobileForm 
+                                ? 'duration-[400ms] ease-out max-h-0 opacity-0 scale-95 pointer-events-none mb-0' 
+                                : 'duration-[700ms] delay-[300ms] ease-[cubic-bezier(0.32,0.72,0,1)] max-h-[300px] opacity-100 scale-100 mb-[40px]'
+                        }`}
+                    >
+                        <h2
+                            style={{ fontFamily: 'Syne, sans-serif', color: '#ffffff', letterSpacing: '-0.01em', fontSize: '20px', fontWeight: 700, lineHeight: 1.3, marginBottom: '0.5rem' }}
+                        >
+                            Learn once, remember forever.
+                        </h2>
+                        <p className="text-[14px] sm:text-[15px] leading-relaxed max-w-[300px] sm:max-w-none" style={{ color: 'rgba(255,255,255,0.75)' }}>
+                            Active recall through AI. Next revision auto-scheduled by performance.
+                        </p>
+                    </div>
+
+                    {/* Desktop Tagline (Hidden on Mobile completely now to match design) */}
+                    <div className="hidden md:block w-full">
+                        <h2
+                            style={{ fontFamily: 'Syne, sans-serif', color: '#ffffff', letterSpacing: '-0.03em', fontSize: '2.2rem', fontWeight: 700, lineHeight: 1.2, marginBottom: '1rem' }}
+                        >
+                            Learn once,<br />
+                            remember forever.
+                        </h2>
+                        <p className="text-[15px] leading-relaxed mb-10" style={{ color: 'rgba(255,255,255,0.65)' }}>
+                            AntiForget uses AI-generated quizzes to trigger active recall.<br />Your next revision is automatically scheduled based on how well you perform.
+                        </p>
+
+                        {/* Feature cards */}
+                        <div className="space-y-3">
+                            {FEATURES.map((f, i) => {
+                                const cardColors = ['rgba(255,255,255,0.15)', 'rgba(20,184,166,0.22)', 'rgba(34,197,94,0.20)'];
+                                const borderColors = ['rgba(255,255,255,0.30)', 'rgba(20,184,166,0.40)', 'rgba(34,197,94,0.38)'];
+                                const iconColors = ['#bfdbfe', '#5eead4', '#86efac'];
+                                return (
+                                    <div
+                                        key={f.label}
+                                        className="flex items-center gap-4 px-5 py-3.5 rounded-2xl"
+                                        style={{
+                                            background: cardColors[i],
+                                            border: `1px solid ${borderColors[i]}`,
+                                            backdropFilter: 'blur(12px)',
+                                        }}
+                                    >
+                                        <span
+                                            className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                                            style={{ background: 'rgba(255,255,255,0.12)', color: iconColors[i] }}
+                                        >
+                                            {f.icon}
+                                        </span>
+                                        <span className="text-sm font-semibold" style={{ color: 'rgba(255,255,255,0.90)' }}>{f.label}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* Bottom attribution */}
+                        <div className="mt-12 flex items-center gap-2" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                            <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="text-xs">Open-source · Privacy-first · Free forever</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Mobile Bottom Buttons (Landing State) */}
+                <div 
+                    className={`absolute bottom-0 left-0 right-0 p-8 flex flex-col items-center gap-5 md:hidden transition-all duration-[1000ms] ease-[cubic-bezier(0.32,0.72,0,1)] z-10 ${
+                        showMobileForm ? 'translate-y-full opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'
+                    }`}
+                >
+                    <button 
+                        onClick={() => { setFormMode('signup'); setShowMobileForm(true); }}
+                        className="w-full bg-white text-emerald-600 font-bold py-4 rounded-xl shadow-xl text-[16px] hover:-translate-y-0.5 transition-transform"
+                    >
+                        Get Started
+                    </button>
+                    <button 
+                        onClick={() => { setFormMode('signin'); setShowMobileForm(true); }}
+                        className="text-white text-[13px] font-medium opacity-80 hover:opacity-100"
+                    >
+                        I already have an account
+                    </button>
+                </div>
+            </div>
+
+            {/* ─── LEFT PANEL: Form (Slides up on Mobile) ─── */}
+            <div
+                className={`absolute inset-x-0 bottom-0 z-20 h-auto max-h-[85dvh] md:max-h-none md:h-full md:relative flex flex-col w-full md:w-1/2 flex-1 md:flex-none overflow-y-auto scrollbar-on-intent transition-transform duration-[1000ms] ease-[cubic-bezier(0.32,0.72,0,1)] bg-[var(--bg-surface)] md:bg-[var(--bg-surface-raised)] rounded-t-[32px] md:rounded-none shadow-[0_-10px_40px_rgba(0,0,0,0.2)] md:shadow-none ${
+                    showMobileForm ? 'translate-y-0' : 'translate-y-full md:translate-y-0'
+                }`}
+            >
+                {/* Mobile Drag Handle / Close indicator */}
+                <div 
+                    className="md:hidden w-full flex justify-center py-4 cursor-pointer flex-shrink-0"
+                    onClick={() => setShowMobileForm(false)}
+                >
+                    <div className="w-12 h-1.5 rounded-full" style={{ background: 'var(--border-strong)' }} />
+                </div>
+
+                <div className="relative z-10 flex flex-col flex-1 px-8 sm:px-10 pt-4 pb-12 md:py-12 w-full max-w-[500px] mx-auto md:justify-center transition-all duration-300">
 
                     {/* Headline */}
                     <div className="mb-4">
@@ -395,40 +616,48 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ hasGoogleClientId, onL
                                 </button>
 
                                 {/* Inline passkey register */}
-                                {showPasskeyRegister && (
-                                    <div
-                                        className="mt-2 px-4 pb-4 pt-3 space-y-2.5 rounded-xl"
-                                        style={{ background: 'var(--bg-surface-raised)', border: '1px solid var(--border-subtle)' }}
-                                    >
-                                        <p className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Create new passkey</p>
-                                        <div className="space-y-1">
-                                            <label htmlFor="passkey-name" className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
-                                                Your name
-                                            </label>
-                                            <input
-                                                id="passkey-name"
-                                                value={passkeyName}
-                                                onChange={(e) => setPasskeyName(e.target.value)}
-                                                placeholder="e.g. Mehdi"
-                                                className="input-field"
-                                            />
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={handleRegisterPasskey}
-                                            disabled={isPasskeyLoading}
-                                            className="btn-primary text-xs py-2 px-4 w-full"
+                                <div
+                                    style={{
+                                        display: 'grid',
+                                        gridTemplateRows: showPasskeyRegister ? '1fr' : '0fr',
+                                        transition: 'grid-template-rows 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    }}
+                                >
+                                    <div style={{ overflow: 'hidden', minHeight: 0, opacity: showPasskeyRegister ? 1 : 0, transition: 'opacity 0.25s ease' }}>
+                                        <div
+                                            className="mt-3 px-4 pb-4 pt-3 space-y-2.5 rounded-xl block"
+                                            style={{ background: 'var(--bg-surface-raised)', border: '1px solid var(--border-subtle)' }}
                                         >
-                                            {isPasskeyLoading ? 'Processing…' : 'Create passkey'}
-                                        </button>
+                                            <p className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Create new passkey</p>
+                                            <div className="space-y-1">
+                                                <label htmlFor="passkey-name" className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+                                                    Your name
+                                                </label>
+                                                <input
+                                                    id="passkey-name"
+                                                    value={passkeyName}
+                                                    onChange={(e) => setPasskeyName(e.target.value)}
+                                                    placeholder="e.g. Mehdi"
+                                                    className="input-field"
+                                                />
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={handleRegisterPasskey}
+                                                disabled={isPasskeyLoading}
+                                                className="btn-primary text-xs py-2 px-4 w-full"
+                                            >
+                                                {isPasskeyLoading ? 'Processing…' : 'Create passkey'}
+                                            </button>
+                                        </div>
                                     </div>
-                                )}
+                                </div>
                             </div>
                         )}
                     </div>
 
                     {/* Spacer */}
-                    <div className="flex-1" />
+                    <div className="flex-1 md:hidden" />
 
                     {/* Footer */}
                     <div className="mt-4 pt-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
@@ -472,133 +701,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ hasGoogleClientId, onL
                 visible={isGoogleLoading}
                 label="Signing you in..."
             />
-
-            {/* ─── RIGHT PANEL: Decorative ─── */}
-            <div
-                className="flex flex-col w-full lg:w-1/2 flex-shrink-0 relative overflow-hidden order-first lg:order-none"
-                style={{
-                    background: 'linear-gradient(145deg, #1d4ed8 0%, #0f9e8c 45%, #16a34a 100%)',
-                }}
-            >
-                {/* Subtle dot-grid overlay */}
-                <div
-                    className="absolute inset-0 pointer-events-none"
-                    style={{
-                        backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.08) 1px, transparent 1px)',
-                        backgroundSize: '28px 28px',
-                    }}
-                />
-
-                {/* Glow orbs */}
-                <div className="absolute pointer-events-none" style={{ top: '10%', right: '15%', width: '260px', height: '260px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,255,255,0.22) 0%, transparent 70%)' }} />
-                <div className="absolute pointer-events-none" style={{ bottom: '12%', left: '10%', width: '200px', height: '200px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(20,184,166,0.40) 0%, transparent 70%)' }} />
-                <div className="absolute pointer-events-none" style={{ top: '55%', right: '5%', width: '140px', height: '140px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(34,197,94,0.35) 0%, transparent 70%)' }} />
-
-                {/* Decorative rings */}
-                <div className="absolute pointer-events-none" style={{ top: '-60px', right: '-60px', width: '320px', height: '320px', borderRadius: '50%', border: '1px solid rgba(255,255,255,0.07)' }} />
-                <div className="absolute pointer-events-none" style={{ top: '-20px', right: '-20px', width: '220px', height: '220px', borderRadius: '50%', border: '1px solid rgba(255,255,255,0.06)' }} />
-                <div className="absolute pointer-events-none" style={{ bottom: '-80px', left: '-80px', width: '380px', height: '380px', borderRadius: '50%', border: '1px solid rgba(255,255,255,0.05)' }} />
-
-                {/* Content */}
-                <div className="relative z-10 flex flex-col justify-center flex-1 px-6 py-4 lg:px-14 lg:py-16">
-
-                    {/* Logo + Name */}
-                    <div className="flex items-center gap-4 mb-0 lg:mb-8">
-                        <div
-                            className="w-16 h-16 rounded-3xl flex items-center justify-center flex-shrink-0"
-                            style={{
-                                background: 'rgba(255,255,255,0.12)',
-                                border: '1px solid rgba(255,255,255,0.20)',
-                                backdropFilter: 'blur(12px)',
-                            }}
-                        >
-                            <span
-                                aria-hidden="true"
-                                style={{
-                                    display: 'block',
-                                    width: '36px',
-                                    height: '36px',
-                                    background: '#ffffff',
-                                    maskImage: 'url(/icon.svg)',
-                                    maskRepeat: 'no-repeat',
-                                    maskPosition: 'center',
-                                    maskSize: 'contain',
-                                    WebkitMaskImage: 'url(/icon.svg)',
-                                    WebkitMaskRepeat: 'no-repeat',
-                                    WebkitMaskPosition: 'center',
-                                    WebkitMaskSize: 'contain',
-                                }}
-                            />
-                        </div>
-                        <div>
-                            <p className="text-[18px] font-bold tracking-tight" style={{ fontFamily: 'Syne, sans-serif', color: '#ffffff', lineHeight: 1.2 }}>
-                                AntiForget
-                            </p>
-                            <p className="text-[12px]" style={{ color: 'rgba(255,255,255,0.55)' }}>Smart Revision System</p>
-                        </div>
-                    </div>
-
-                    {/* Tagline */}
-                    <h2
-                        className="hidden lg:block"
-                        style={{ fontFamily: 'Syne, sans-serif', color: '#ffffff', letterSpacing: '-0.03em', fontSize: '2.2rem', fontWeight: 700, lineHeight: 1.2, marginBottom: '1rem' }}
-                    >
-                        Master anything{' '}
-                        <span
-                            className="inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full"
-                            style={{
-                                background: '#ff4d00',
-                                color: '#ffffff',
-                                border: '1px solid #ffa200',
-                                verticalAlign: 'middle',
-                                letterSpacing: '0.06em',
-                                lineHeight: '1',
-                            }}
-                        >
-                            FOR FREE
-                        </span>
-                        <br />
-                        with AI precision.
-                    </h2>
-                    <p className="hidden lg:block text-[15px] leading-relaxed mb-10" style={{ color: 'rgba(255,255,255,0.65)' }}>
-                        Import PDFs & notes, map the connections, and crush<br />3-question AI quizzes for deep, active mastery.
-                    </p>
-
-                    {/* Feature cards */}
-                    <div className="hidden lg:block space-y-3">
-                        {FEATURES.map((f, i) => {
-                            const cardColors = ['rgba(255,255,255,0.15)', 'rgba(20,184,166,0.22)', 'rgba(34,197,94,0.20)'];
-                            const borderColors = ['rgba(255,255,255,0.30)', 'rgba(20,184,166,0.40)', 'rgba(34,197,94,0.38)'];
-                            const iconColors = ['#bfdbfe', '#5eead4', '#86efac'];
-                            return (
-                                <div
-                                    key={f.label}
-                                    className="flex items-center gap-4 px-5 py-3.5 rounded-2xl"
-                                    style={{
-                                        background: cardColors[i],
-                                        border: `1px solid ${borderColors[i]}`,
-                                        backdropFilter: 'blur(12px)',
-                                    }}
-                                >
-                                    <span
-                                        className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-                                        style={{ background: 'rgba(255,255,255,0.12)', color: iconColors[i] }}
-                                    >
-                                        {f.icon}
-                                    </span>
-                                    <span className="text-sm font-semibold" style={{ color: 'rgba(255,255,255,0.90)' }}>{f.label}</span>
-                                </div>
-                            );
-                        })}
-                    </div>
-
-                    {/* Bottom attribution */}
-                    <div className="hidden lg:flex mt-12 items-center gap-2" style={{ color: 'rgba(255,255,255,0.35)' }}>
-                        <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" />
-                        <span className="text-xs">Open-source · Privacy-first · Free forever</span>
-                    </div>
-                </div>
-            </div>
 
         </div>
     );
