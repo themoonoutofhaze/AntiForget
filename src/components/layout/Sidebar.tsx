@@ -23,31 +23,31 @@ const NAV_ITEMS: NavItem[] = [
     {
         id: 'home',
         label: 'Dashboard',
-        icon: <LayoutDashboard className="w-4 h-4 flex-shrink-0" />,
+        icon: <LayoutDashboard className="w-5 h-5 flex-shrink-0" />,
         description: 'Overview & stats',
     },
     {
         id: 'distill',
         label: 'Topics',
-        icon: <Layers className="w-4 h-4 flex-shrink-0" />,
+        icon: <Layers className="w-5 h-5 flex-shrink-0" />,
         description: 'Create, edit, and link topics',
     },
     {
         id: 'arena',
         label: 'Socratic Review',
-        icon: <MessageSquare className="w-4 h-4 flex-shrink-0" />,
+        icon: <MessageSquare className="w-5 h-5 flex-shrink-0" />,
         description: 'Socratic sessions',
     },
     {
         id: 'settings',
         label: 'App Settings',
-        icon: <Settings2 className="w-4 h-4 flex-shrink-0" />,
+        icon: <Settings2 className="w-5 h-5 flex-shrink-0" />,
         description: 'Preferences',
     },
     {
         id: 'info',
         label: 'Help & Info',
-        icon: <Info className="w-4 h-4 flex-shrink-0" />,
+        icon: <Info className="w-5 h-5 flex-shrink-0" />,
         description: 'How the system works',
     },
 ];
@@ -175,18 +175,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     by Mehdi Nickzamir
                                 </a>
                             </div>
-                            <a
+                        <a
                                 href="https://ko-fi.com/mehdinickzamir"
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="group shrink-0 px-2 py-1 rounded-full inline-flex items-center justify-center gap-1 text-[10px] font-semibold border bg-[var(--bg-muted)] transition-all duration-300 hover:scale-105 hover:shadow-md hover:bg-[rgba(239,68,68,0.14)]"
+                                className="group shrink-0 px-3 py-2 rounded-full inline-flex items-center justify-center gap-1.5 text-xs font-semibold border bg-[var(--bg-muted)] transition-all duration-300 hover:scale-105 hover:shadow-md hover:bg-[rgba(239,68,68,0.14)]"
                                 style={{
                                     color: 'rgba(220, 38, 38, 0.72)',
                                     borderColor: 'var(--border-default)',
                                 }}
                             >
-                                <span className="inline-flex items-center justify-center rounded-full p-[2px] transition-transform duration-300 group-hover:scale-110" style={{ background: 'rgba(239, 68, 68, 0.14)' }}>
-                                    <Heart className="w-3 h-3 fill-current transition-all duration-300 group-hover:animate-pulse" style={{ color: 'rgba(220, 38, 38, 0.94)' }} />
+                                <span className="inline-flex items-center justify-center rounded-full p-[3px] transition-transform duration-300 group-hover:scale-110" style={{ background: 'rgba(239, 68, 68, 0.14)' }}>
+                                    <Heart className="w-3.5 h-3.5 fill-current transition-all duration-300 group-hover:animate-pulse" style={{ color: 'rgba(220, 38, 38, 0.94)' }} />
                                 </span>
                                 <span>Support</span>
                             </a>

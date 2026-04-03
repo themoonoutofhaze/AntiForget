@@ -600,7 +600,7 @@ export const SocraticArena: React.FC = () => {
     ══════════════════════════════════════════════════════════ */
     if (phase === 'lobby') {
         return (
-            <div className="animate-slide-up w-full space-y-6">
+            <div className="animate-slide-up w-full space-y-6 socratic-liveness-hint">
                 {/* Friendly banner */}
               
 
@@ -771,35 +771,37 @@ export const SocraticArena: React.FC = () => {
 
         return (
             <div className="animate-slide-up w-full space-y-6 pb-8">
-                <div className="glass-card w-full overflow-hidden px-6 py-8 md:px-10 md:py-10 space-y-8">
+                <div className="glass-card w-full overflow-hidden px-4 py-6 md:px-10 md:py-10 space-y-6 md:space-y-8">
                     {/* Header */}
-                    <div className="max-w-4xl mx-auto w-full grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 lg:items-end">
-                        <div className="space-y-2 min-w-0">
-                            <span className="section-eyebrow">Knowledge Check</span>
-                            <h2 className="section-title text-2xl mt-0.5">
-                                <span className="text-base font-normal" style={{ color: 'var(--accent-primary)' }}>Revising</span>{' '}{currentTopicName || 'Unknown Topic'} {isUnrecorded && <span className="text-sm font-normal ml-2 opacity-60">(Practice Mode)</span>}
-                            </h2>
-                            <div className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-                                {questionGenerationMs !== null && (
-                                    <span>
-                                        <span style={{ color: 'var(--accent-primary)' }}>✓</span>{' '}
-                                        Questions generated in <span style={{ color: 'var(--accent-primary)' }}>{(questionGenerationMs / 1000).toFixed(2)}s</span>
-                                        {activeModelInfo?.model ? (
-                                            <span> using <span style={{ color: 'var(--text-primary)' }}>{activeModelInfo.model}</span></span>
-                                        ) : null}
-                                    </span>
-                                )}
+                    <div className="max-w-4xl mx-auto w-full">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="space-y-1 min-w-0 flex-1">
+                                <span className="section-eyebrow">Knowledge Check</span>
+                                <h2 className="section-title text-xl md:text-2xl mt-0.5 leading-tight">
+                                    <span className="font-normal" style={{ color: 'var(--accent-primary)' }}>Revising</span>{' '}{currentTopicName || 'Unknown Topic'} {isUnrecorded && <span className="text-sm font-normal ml-2 opacity-60">(Practice Mode)</span>}
+                                </h2>
+                                <div className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
+                                    {questionGenerationMs !== null && (
+                                        <span>
+                                            <span style={{ color: 'var(--accent-primary)' }}>✓</span>{' '}
+                                            Generated in <span style={{ color: 'var(--accent-primary)' }}>{(questionGenerationMs / 1000).toFixed(2)}s</span>
+                                            {activeModelInfo?.model ? (
+                                                <span> · <span style={{ color: 'var(--text-primary)' }}>{activeModelInfo.model}</span></span>
+                                            ) : null}
+                                        </span>
+                                    )}
+                                </div>
                             </div>
-                        </div>
-                        <div className="flex items-center justify-start lg:justify-end gap-2">
-                            {isTimerActive && (
-                                <Timer initialSeconds={sessionMinutesLimit * 60} isActive={isTimerActive} onComplete={handleTimeUp} />
-                            )}
-                            <button id="close-quiz-btn" onClick={resetToLobby}
-                                className="text-xs px-3 py-1.5 rounded-lg border"
-                                style={{ borderColor: 'rgba(220,38,38,0.34)', color: '#dc2626', background: 'rgba(220,38,38,0.12)' }}>
-                                Exit
-                            </button>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                                {isTimerActive && (
+                                    <Timer initialSeconds={sessionMinutesLimit * 60} isActive={isTimerActive} onComplete={handleTimeUp} />
+                                )}
+                                <button id="close-quiz-btn" onClick={resetToLobby}
+                                    className="font-semibold rounded-xl border"
+                                    style={{ borderColor: 'rgba(220,38,38,0.34)', color: '#dc2626', background: 'rgba(220,38,38,0.12)', padding: '10px 18px' }}>
+                                    Exit
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -840,27 +842,25 @@ export const SocraticArena: React.FC = () => {
                     </div>
 
                     {/* Submit */}
-                    <div className="flex flex-col items-center gap-3">
+                    <div className="flex flex-col items-center gap-3 max-w-4xl mx-auto w-full">
                         {!allFilled && !isSubmitting && (
-                            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                            <p className="text-sm text-center" style={{ color: 'var(--text-muted)' }}>
                                 Fill in all answers — write "I don't know" if you're stuck 🙂
                             </p>
                         )}
-                        <div className="flex flex-wrap items-center justify-center gap-3">
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 w-full">
                             <button
                                 id="skip-topic-btn"
                                 onClick={skipCurrentTopic}
                                 disabled={isSubmitting}
-                                className="btn-secondary"
-                                style={{ minWidth: 160 }}>
+                                className="btn-secondary">
                                 Skip Topic
                             </button>
                             <button
                                 id="submit-answers-btn"
                                 onClick={submitAnswers}
                                 disabled={isSubmitting || (!allFilled && answers.every((a) => a.trim() === ''))}
-                                className="btn-primary gap-2"
-                                style={{ minWidth: 220 }}>
+                                className="btn-primary gap-2">
                                 {isSubmitting ? (
                                     <>
                                         <div className="quiz-btn-spinner" />
@@ -897,7 +897,7 @@ export const SocraticArena: React.FC = () => {
             : 'Review complete.';
 
         return (
-            <div className="animate-slide-up w-full space-y-6 pb-8">
+            <div className="animate-slide-up w-full space-y-6 pb-8 page-nudge-scroll">
                 {/* Result banner */}
                 <div className="quiz-result-banner glass-card max-w-4xl mx-auto p-6 text-center space-y-2">
                     <div className="text-4xl">{overallEmoji}</div>
@@ -1051,20 +1051,20 @@ export const SocraticArena: React.FC = () => {
                 </div>
 
                 {/* Navigation */}
-                <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <div className="flex flex-col sm:flex-row gap-3 justify-center max-w-4xl mx-auto w-full">
                     {dueNodes.length > 0 && !isUnrecorded && (
-                        <button id="next-review-btn" onClick={() => startQuiz(false)} className="btn-primary gap-2">
+                        <button id="next-review-btn" onClick={() => startQuiz(false)} className="btn-primary gap-2 flex-1 sm:flex-none">
                             <ChevronRight className="w-4 h-4" />
                             Next Topic ({dueNodes.length} left)
                         </button>
                     )}
                     {isUnrecorded && (
-                        <button id="next-unrecorded-btn" onClick={() => startQuiz(true)} className="btn-primary gap-2">
+                        <button id="next-unrecorded-btn" onClick={() => startQuiz(true)} className="btn-primary gap-2 flex-1 sm:flex-none">
                             <ChevronRight className="w-4 h-4" />
                             Practice Another
                         </button>
                     )}
-                    <button id="back-to-lobby-btn" onClick={resetToLobby} className="btn-secondary gap-2">
+                    <button id="back-to-lobby-btn" onClick={resetToLobby} className="btn-secondary gap-2 flex-1 sm:flex-none">
                         Back to Overview
                     </button>
                 </div>

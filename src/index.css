@@ -142,6 +142,7 @@
 
   button,
   [role='button'],
+  a,
   .nav-item,
   .upload-zone,
   .pool-topic-row,
@@ -149,6 +150,11 @@
   .priority-drag-handle {
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
+  }
+
+  /* Ensure every interactive element has an accessible hit area */
+  button, [role='button'], a {
+    position: relative;
   }
 }
 
@@ -289,12 +295,12 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 44px;
-  padding: 10px 12px;
-  border-radius: 10px;
+  min-height: 48px;
+  padding: 12px 14px;
+  border-radius: 12px;
   cursor: pointer;
   color: var(--text-secondary);
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   font-weight: 500;
   transition: all 0.2s ease;
   border: 1px solid transparent;
@@ -302,6 +308,8 @@
   text-decoration: none;
   user-select: none;
   white-space: nowrap;
+  /* Extend the click/tap area to guarantee full-width coverage */
+  width: 100%;
 }
 
 .nav-item:hover {
@@ -401,17 +409,28 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 42px;
-  padding: 10px 20px;
+  min-height: 48px;
+  padding: 12px 22px;
   background: var(--accent-primary);
   color: #fff;
-  border-radius: 10px;
-  font-size: 0.875rem;
+  border-radius: 12px;
+  font-size: 0.9375rem;
   font-weight: 600;
   border: none;
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
+  /* Guarantee full-button tap area on all devices */
+  position: relative;
+  isolation: isolate;
+}
+
+/* Invisible hit-area extender so taps on icon/text still register */
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
 }
 
 .btn-primary:hover {
@@ -421,7 +440,7 @@
 }
 
 .btn-primary:active {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.98);
 }
 
 .btn-primary:disabled {
@@ -435,23 +454,36 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 42px;
-  padding: 10px 20px;
+  min-height: 48px;
+  padding: 12px 22px;
   background: transparent;
   color: var(--text-primary);
-  border-radius: 10px;
-  font-size: 0.875rem;
+  border-radius: 12px;
+  font-size: 0.9375rem;
   font-weight: 500;
   border: 1px solid var(--border-default);
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
+  position: relative;
+  isolation: isolate;
+}
+
+.btn-secondary::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
 }
 
 .btn-secondary:hover {
   background: var(--bg-subtle);
   border-color: var(--accent-primary);
   color: var(--accent-primary);
+}
+
+.btn-secondary:active {
+  transform: scale(0.98);
 }
 
 .btn-secondary:disabled {
@@ -514,21 +546,35 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 40px;
-  padding: 8px 14px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 10px 14px;
   background: transparent;
   color: var(--text-secondary);
-  border-radius: 8px;
-  font-size: 0.8125rem;
+  border-radius: 10px;
+  font-size: 0.875rem;
   font-weight: 500;
   border: none;
   cursor: pointer;
   transition: all 0.18s ease;
+  position: relative;
+  isolation: isolate;
+}
+
+.btn-ghost::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
 }
 
 .btn-ghost:hover {
   background: var(--bg-subtle);
   color: var(--text-primary);
+}
+
+.btn-ghost:active {
+  transform: scale(0.95);
 }
 
 /* ========================================
@@ -1250,24 +1296,54 @@
 
 @media (pointer: coarse) {
   .btn-primary,
-  .btn-secondary,
-  .btn-ghost,
-  .nav-item,
+  .btn-secondary {
+    min-height: 52px;
+    font-size: 1rem;
+    padding: 14px 24px;
+    border-radius: 14px;
+  }
+
+  .btn-ghost {
+    min-height: 48px;
+    min-width: 48px;
+    padding: 12px 16px;
+  }
+
+  .nav-item {
+    min-height: 54px;
+    padding: 14px 16px;
+    font-size: 1rem;
+    gap: 14px;
+    border-radius: 14px;
+  }
+
   .dash-action-card,
   .pool-topic-row,
   .upload-zone,
   .toggle,
   .priority-drag-handle {
-    min-height: 44px;
+    min-height: 52px;
   }
 
   input,
   textarea,
   select {
     font-size: 16px;
+    min-height: 48px;
+    padding: 12px 14px;
   }
 
-  button:active,
+  /* Stronger active feedback on touch */
+  .btn-primary:active {
+    transform: scale(0.96);
+    animation: touch-jiggle 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .btn-secondary:active,
+  .btn-ghost:active {
+    animation: touch-jiggle 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
   .nav-item:active,
   .dash-action-card:active,
   .pool-topic-row:active,
@@ -1938,4 +2014,195 @@
   font-size: 0.875rem;
   color: var(--text-primary);
   line-height: 1.6;
+}
+
+/* ========================================
+   MOBILE — SIDEBAR ENHANCEMENTS
+   ======================================== */
+
+@media (max-width: 1024px) {
+  .sidebar-logo p {
+    font-size: 1rem !important;
+  }
+
+  .sidebar-logo p:last-child {
+    font-size: 0.75rem !important;
+  }
+
+  .section-eyebrow {
+    font-size: 0.75rem;
+    padding: 6px 4px 2px;
+  }
+
+  /* Support / branding link bigger on mobile */
+  .sidebar a[href*="ko-fi"],
+  .sidebar a[href*="sponsors"] {
+    min-height: 48px;
+    padding: 10px 16px !important;
+    font-size: 0.9375rem !important;
+    border-radius: 14px !important;
+    gap: 8px !important;
+  }
+
+  .sidebar a[href*="ko-fi"] span:last-child,
+  .sidebar a[href*="sponsors"] span:last-child {
+    font-size: 0.9375rem !important;
+  }
+
+  .sidebar a[href*="ko-fi"] svg,
+  .sidebar a[href*="sponsors"] svg {
+    width: 1.1rem !important;
+    height: 1.1rem !important;
+  }
+
+  /* "By Mehdi" author link */
+  .sidebar a[href*="mehdinickzamir.com"] {
+    font-size: 0.9375rem !important;
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* Bottom branding label */
+  .sidebar p[style*="text-muted"],
+  .sidebar [class*="text-[9px]"],
+  .sidebar [class*="text-[10px]"] {
+    font-size: 0.6875rem !important;
+  }
+}
+
+/* ========================================
+   SOCRATIC REVIEW — LIVENESS BOUNCE
+   ======================================== */
+
+@keyframes socratic-liveness-bounce {
+  0%   { transform: translateY(0); }
+  18%  { transform: translateY(-10px); }
+  36%  { transform: translateY(0); }
+  50%  { transform: translateY(-5px); }
+  64%  { transform: translateY(0); }
+  76%  { transform: translateY(-2px); }
+  100% { transform: translateY(0); }
+}
+
+/* Applied to the lobby page wrapper, triggered once on mount via JS */
+.socratic-liveness-hint {
+  animation: socratic-liveness-bounce 1.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) 0.8s 1 both;
+  transform-origin: center;
+}
+
+/* Subtle continuous breathing to show the page is alive */
+@keyframes socratic-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
+}
+
+.socratic-breathe {
+  animation: socratic-breathe 3s ease-in-out infinite;
+}
+
+/* ========================================
+   QUIZ — MOBILE TOUCH IMPROVEMENTS
+   ======================================== */
+
+@media (pointer: coarse) {
+  /* Ensure the Exit/close-quiz button is always tappable */
+  #close-quiz-btn {
+    min-height: 48px;
+    min-width: 72px;
+    padding: 12px 18px;
+    font-size: 0.9375rem;
+    border-radius: 12px;
+  }
+
+  /* Skip topic button */
+  #skip-topic-btn {
+    min-height: 52px;
+    width: 100%;
+    font-size: 1rem;
+  }
+
+  /* Submit answers button */
+  #submit-answers-btn {
+    min-height: 56px;
+    width: 100%;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+
+  /* Start buttons on lobby */
+  #start-session-btn,
+  #start-unrecorded-btn {
+    min-height: 56px;
+    width: 100%;
+    font-size: 1rem;
+    font-weight: 700;
+  }
+
+  /* Chat / AI buttons */
+  #toggle-results-chat-btn,
+  #send-results-chat-btn,
+  #next-review-btn,
+  #next-unrecorded-btn,
+  #back-to-lobby-btn {
+    min-height: 52px;
+    font-size: 1rem;
+  }
+
+  /* Textarea for quiz answers — bigger on mobile */
+  .quiz-answer-textarea {
+    min-height: 120px;
+    font-size: 1rem;
+    padding: 14px;
+    border-radius: 12px;
+  }
+
+  /* Quiz question text bigger */
+  .quiz-q-text {
+    font-size: 1rem;
+    line-height: 1.65;
+  }
+
+  .quiz-nudge-bar {
+    font-size: 0.9375rem;
+    padding: 12px 16px;
+    border-radius: 12px;
+  }
+
+  /* Bigger number bubble */
+  .quiz-q-number {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    font-size: 0.875rem;
+  }
+
+  /* Result/score badge bigger */
+  .quiz-score-badge {
+    padding: 10px 14px;
+    min-width: 72px;
+  }
+
+  .quiz-score-emoji { font-size: 1.35rem; }
+  .quiz-score-num  { font-size: 1rem; }
+  .quiz-score-label { font-size: 0.75rem; }
+}
+
+/* ========================================
+   MOBILE — PAGE SCROLL LIVENESS NUDGE
+   ======================================== */
+
+/* Animate the container briefly to signal the page is scrollable and alive */
+@keyframes page-nudge-scroll {
+  0%   { transform: translateY(0); }
+  28%  { transform: translateY(22px); }
+  55%  { transform: translateY(-10px); }
+  75%  { transform: translateY(5px); }
+  90%  { transform: translateY(-2px); }
+  100% { transform: translateY(0); }
+}
+
+.page-nudge-scroll {
+  animation: page-nudge-scroll 0.75s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
 }
