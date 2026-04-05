@@ -3,8 +3,83 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Antiforget | smart revision system</title>
-    <meta name="description" content="AntiForget helps you distill notes, connect ideas, and retain knowledge with AI-powered spaced repetition and Socratic review sessions." />
+
+    <!-- Primary Meta -->
+    <title>AntiForget — AI-Powered Spaced Repetition &amp; Active Recall</title>
+    <meta name="description" content="AntiForget is an AI-powered active learning platform. Distill documents into structured knowledge, visualize concept connections, and master any subject with spaced repetition and Socratic review sessions." />
+    <meta name="keywords" content="spaced repetition, active recall, AI learning, knowledge retention, Socratic method, flashcards, study app, FSRS, memory, learning tool, AntiForget" />
+    <meta name="author" content="AntiForget" />
+    <link rel="canonical" href="https://antiforget.app/" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://antiforget.app/" />
+    <meta property="og:site_name" content="AntiForget" />
+    <meta property="og:title" content="AntiForget — AI-Powered Spaced Repetition &amp; Active Recall" />
+    <meta property="og:description" content="Transform your documents into structured knowledge maps. Master any subject with AI-assisted spaced repetition, Socratic review sessions, and visual knowledge graphs." />
+    <meta property="og:image" content="https://antiforget.app/icon-512.png" />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
+    <meta property="og:image:alt" content="AntiForget app icon" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter / X Card -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="AntiForget — AI-Powered Spaced Repetition &amp; Active Recall" />
+    <meta name="twitter:description" content="Transform your documents into structured knowledge maps. Master any subject with AI-assisted spaced repetition, Socratic review sessions, and visual knowledge graphs." />
+    <meta name="twitter:image" content="https://antiforget.app/icon-512.png" />
+
+    <!-- Structured Data: SoftwareApplication -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "AntiForget",
+      "url": "https://antiforget.app",
+      "description": "An AI-powered active learning platform that distills documents into structured knowledge maps and conducts Socratic review sessions using spaced repetition (FSRS) to maximize long-term retention.",
+      "applicationCategory": "EducationApplication",
+      "operatingSystem": "Web",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "featureList": [
+        "AI-powered document distillation (PDF, DOCX)",
+        "Visual knowledge graph for concept connections",
+        "Socratic review sessions with LLM questioning",
+        "FSRS spaced repetition scheduling",
+        "Google Drive integration",
+        "Passkey and Google OAuth authentication",
+        "Dark and light mode"
+      ],
+      "screenshot": "https://antiforget.app/icon-512.png",
+      "softwareVersion": "1.0.7",
+      "author": {
+        "@type": "Organization",
+        "name": "AntiForget",
+        "url": "https://antiforget.app"
+      }
+    }
+    </script>
+
+    <!-- Structured Data: WebSite -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "AntiForget",
+      "url": "https://antiforget.app",
+      "description": "AI-powered spaced repetition and active recall platform for long-term knowledge retention.",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "https://antiforget.app/?q={search_term_string}",
+        "query-input": "required name=search_term_string"
+      }
+    }
+    </script>
+
+    <!-- Icons & PWA -->
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
@@ -15,12 +90,27 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="AntiForget" />
     <meta name="theme-color" content="#0c4a6e" />
+
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Syne:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <style>
+        .noscript-msg { font-family: sans-serif; max-width: 600px; margin: 80px auto; padding: 32px; text-align: center; }
+        .noscript-msg h1 { font-size: 1.75rem; margin-bottom: 12px; }
+        .noscript-msg p { color: #555; line-height: 1.6; }
+        .noscript-msg a { color: #0c4a6e; }
+      </style>
+      <div class="noscript-msg">
+        <h1>AntiForget — AI-Powered Spaced Repetition</h1>
+        <p>AntiForget is an AI-powered active learning platform. Distill documents, build knowledge graphs, and master any subject with spaced repetition and Socratic review sessions.</p>
+        <p>Please enable JavaScript to use AntiForget. Visit <a href="https://antiforget.app">antiforget.app</a>.</p>
+      </div>
+    </noscript>
     <script src="https://js.puter.com/v2/"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

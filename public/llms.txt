@@ -1,0 +1,32 @@
+# AntiForget
+
+> AI-powered spaced repetition and active recall platform for long-term knowledge retention.
+
+AntiForget is a free, open-source web application that helps learners master complex subjects through AI-assisted knowledge distillation, visual knowledge graphs, and Socratic review sessions backed by the FSRS spaced repetition algorithm.
+
+## What AntiForget Does
+
+- **Distillation Tray**: Upload source documents (PDF, DOCX, plain text) and let AI distill them into concise, actionable summaries and topic cards.
+- **Knowledge Graph**: A visual, interactive graph that maps connections between topics, tags, and ideas so learners see the "big picture" of what they know.
+- **Socratic Arena**: AI-driven review sessions that simulate oral exams and deep questioning to test understanding — not just memorization.
+- **FSRS Spaced Repetition**: Implements the Free Spaced Repetition Scheduler (FSRS) algorithm to schedule reviews at optimal intervals, maximizing long-term retention with minimum study time.
+- **Secure Authentication**: Supports Google OAuth 2.0 and Passkeys (WebAuthn) for passwordless sign-in.
+- **Cloud Storage**: Stores uploaded files via Google Drive integration.
+
+## Who It Is For
+
+Students, researchers, professionals, and lifelong learners who want to move beyond passive re-reading and build durable, structured knowledge.
+
+## Technology
+
+- Frontend: React 19, TypeScript, Vite, Tailwind CSS
+- Backend: Express.js (Node.js), PostgreSQL
+- AI Providers: Gemini, Groq, Mistral, NVIDIA, OpenRouter, Puter.js
+- Algorithm: FSRS (Free Spaced Repetition Scheduler)
+
+## Links
+
+- Homepage: https://antiforget.app
+- Terms of Service: https://antiforget.app/terms-of-service.html
+- Source Code: https://github.com/themoonoutofhaze/AntiForget
+- Full LLM context: https://antiforget.app/llms-full.txt

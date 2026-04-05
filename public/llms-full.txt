@@ -1,0 +1,134 @@
+# AntiForget — Full LLM Reference
+
+> AI-powered spaced repetition and active recall for long-term knowledge retention.
+> URL: https://antiforget.app
+> Version: 1.0.7
+> License: Open Source (see https://antiforget.app/open-source-license.txt)
+
+---
+
+## Overview
+
+AntiForget is a free, open-source web application designed to transform the way people learn. Rather than passive reading or simple flashcards, AntiForget leverages AI to help users distill complex source material into structured knowledge, visualize conceptual connections, and test their understanding through Socratic questioning. Reviews are scheduled algorithmically using the FSRS (Free Spaced Repetition Scheduler) to maximize long-term retention with the minimum required study effort.
+
+---
+
+## Core Features
+
+### 1. Distillation Tray
+Users upload source documents (PDF, DOCX, plain text, or paste raw content). The AI processes the material and produces:
+- A concise structured summary
+- A set of topic cards covering the key concepts
+- Suggested tags and relationships between topics
+
+### 2. Knowledge Graph
+An interactive visual graph (built with @xyflow/react) where:
+- Each topic is a node
+- Connections between related topics are edges
+- Users can zoom, pan, and click nodes to explore their knowledge map
+- Relationships are inferred from document content and user annotations
+
+### 3. Socratic Arena (Review Sessions)
+The core active recall interface:
+- Selects topics from the user's revision pool based on FSRS scheduling
+- An AI model poses open-ended questions derived from the topic's content
+- The user answers in free text; the AI evaluates the depth of understanding
+- FSRS grades (Again / Hard / Good / Easy) are applied to reschedule the topic
+- Supports all configured AI providers: Gemini, Groq, Mistral, NVIDIA, OpenRouter, Puter.js
+
+### 4. FSRS Spaced Repetition
+- Implements the FSRS-4.5 algorithm
+- Tracks stability, difficulty, and retrievability per topic
+- Computes next review date based on desired retention rate
+- Daily goal system: users set a target number of reviews per day
+
+### 5. Authentication
+- Google OAuth 2.0 (requires VITE_GOOGLE_CLIENT_ID at build time)
+- Passkeys / WebAuthn for passwordless sign-in
+- JWT-based sessions
+
+### 6. Storage
+- User-uploaded source files stored via Google Drive API (OAuth 2.0)
+- All user data stored in PostgreSQL (Supabase-compatible)
+- Encrypted API credential storage using AES-256
+
+---
+
+## Technical Architecture
+
+### Frontend
+- Framework: React 19 with TypeScript
+- Build tool: Vite 7
+- Styling: Tailwind CSS v3
+- Key libraries: @xyflow/react (knowledge graph), react-markdown (content rendering), @dnd-kit (drag-and-drop), lucide-react (icons)
+- State: React hooks (no external state manager)
+- PWA: Service worker + Web Manifest
+
+### Backend
+- Runtime: Node.js with Express.js v5
+- Database: PostgreSQL via `pg` library
+- Auth: jsonwebtoken, google-auth-library, @simplewebauthn/server
+- File parsing: mammoth (DOCX), pdf-parse (PDF)
+- Push notifications: web-push
+
+### Database Schema
+Main tables:
+- `users` — user accounts and profile data
+- `topics` — distilled knowledge topics with content and FSRS state
+- `topic_relations` — edges in the knowledge graph
+- `fsrs_records` — per-topic spaced repetition history
+- `user_preferences` — settings (daily goal, AI model, theme, etc.)
+- `api_credentials` — encrypted AI provider API keys
+- `file_assets` — metadata for uploaded source files
+- `drive_connections` — Google Drive OAuth tokens per user
+
+### AI Provider Support
+AntiForget supports multiple AI backends, user-configurable:
+- **Google Gemini** (Gemini 2.0, 2.5, Flash variants)
+- **Groq** (Llama, Mixtral, Gemma)
+- **Mistral AI** (Mistral Large, Nemo)
+- **NVIDIA NIM** (Llama, Mistral, Deepseek)
+- **OpenRouter** (aggregated access to many models)
+- **Puter.js** (free, browser-side AI via puter.com — easy onboarding, no API key needed)
+- **Claude / Anthropic** (configurable)
+
+---
+
+## Use Cases
+
+- **Students**: Distill lecture notes and textbooks into spaced repetition decks; get Socratically questioned by AI before exams.
+- **Researchers**: Organize literature reviews into a visual knowledge graph; track what you've retained from papers.
+- **Professionals**: Master technical documentation, legal texts, or market research with AI-driven active recall.
+- **Language learners**: Build vocabulary and grammar concept maps and review them on an optimized schedule.
+- **Self-directed learners**: Turn any body of text into a structured, long-term learning system.
+
+---
+
+## How It Differs from Alternatives
+
+| Feature | AntiForget | Anki | Notion AI | RemNote |
+|---|---|---|---|---|
+| AI document distillation | Yes | No | Partial | Partial |
+| Socratic AI review | Yes | No | No | No |
+| Visual knowledge graph | Yes | No | No | Yes |
+| FSRS algorithm | Yes | Yes (plugin) | No | Yes |
+| Free & open source | Yes | Yes | No | Partial |
+| Self-hostable | Yes | N/A | No | No |
+
+---
+
+## Deployment
+
+- Self-hostable via Docker (single container)
+- Designed for Google Cloud Run with Supabase PostgreSQL
+- Environment variables: DATABASE_URL, APP_ENCRYPTION_KEY, APP_JWT_SECRET, VITE_GOOGLE_CLIENT_ID, FRONTEND_BASE_URL
+- Production URL: https://antiforget.app
+
+---
+
+## Links
+
+- Homepage: https://antiforget.app
+- GitHub: https://github.com/themoonoutofhaze/AntiForget
+- Terms of Service: https://antiforget.app/terms-of-service.html
+- License: https://antiforget.app/open-source-license.txt
