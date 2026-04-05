@@ -736,7 +736,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
             id={withId ? 'save-provider-key-btn' : undefined}
             onClick={handleSave}
             disabled={saveState === 'saving'}
-            className="btn-primary h-10 px-3 inline-flex items-center justify-center gap-2"
+            className="btn-primary h-11 px-4 inline-flex items-center justify-center gap-2"
             aria-label={saveState === 'saved' ? 'Settings saved' : saveState === 'saving' ? 'Saving settings' : 'Save settings'}
             title={saveState === 'saved' ? 'Saved!' : saveState === 'saving' ? 'Saving...' : 'Save Settings'}
             style={{
@@ -749,21 +749,21 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
             ) : (
                 <Save className={`w-4 h-4${saveState === 'saving' ? ' animate-pulse' : ''}`} color="#ffffff" />
             )}
-            <span className="text-xs font-semibold tracking-wide text-white">
+            <span className="text-sm font-semibold tracking-wide text-white">
                 {saveState === 'saved' ? 'Saved' : saveState === 'saving' ? 'Saving' : 'Save'}
             </span>
         </button>
     );
 
     return (
-        <div className="container mx-auto px-4 py-8">
+        <div className="container mx-auto px-3 py-4 sm:px-4 sm:py-8">
             <div className="animate-slide-up max-w-5xl mx-auto space-y-5">
                 <div ref={topSaveSentinelRef} aria-hidden="true" style={{ height: 1 }} />
                 <div>
                     <div className="flex items-start justify-between gap-3">
                         <div>
                             <span className="section-eyebrow">Configuration</span>
-                            <h2 className="section-title text-3xl mt-1">Settings</h2>
+                            <h2 className="section-title text-2xl sm:text-3xl mt-1">Settings</h2>
                         </div>
                         <div
                             className="hidden sm:flex justify-end transition-opacity duration-300"
@@ -1025,14 +1025,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                             key={value}
                                             type="button"
                                             onClick={() => setQuestionDifficulty(value)}
-                                            className="w-full text-left rounded-lg px-3 py-2.5 transition-all"
+                                            className="w-full text-left rounded-lg px-4 py-3.5 transition-all"
                                             style={{
                                                 background: questionDifficulty === value ? 'rgba(245,158,11,0.10)' : 'var(--bg-elevated)',
                                                 border: `1px solid ${questionDifficulty === value ? '#f59e0b' : 'var(--border-subtle)'}`,
                                             }}
                                         >
-                                            <p className="text-xs font-semibold" style={{ color: questionDifficulty === value ? '#f59e0b' : 'var(--text-primary)' }}>{label}</p>
-                                            <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{desc}</p>
+                                            <p className="text-sm font-semibold" style={{ color: questionDifficulty === value ? '#f59e0b' : 'var(--text-primary)' }}>{label}</p>
+                                            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{desc}</p>
                                         </button>
                                     ))}
                                 </div>
@@ -1092,7 +1092,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                     {notifPermission !== 'granted' && (
                                         <button
                                             type="button"
-                                            className="btn-secondary text-xs"
+                                            className="btn-secondary text-sm"
                                             disabled={notifSubState === 'subscribing'}
                                             onClick={async () => {
                                                 setNotifSubState('subscribing');
@@ -1132,7 +1132,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                     {notifPermission === 'granted' && notifSubState !== 'subscribed' && (
                                         <button
                                             type="button"
-                                            className="btn-secondary text-xs"
+                                            className="btn-secondary text-sm"
                                             disabled={notifSubState === 'subscribing'}
                                             onClick={async () => {
                                                 setNotifSubState('subscribing');
@@ -1259,7 +1259,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                             key={provider}
                                             type="button"
                                             onClick={() => setActiveKeyProvider(provider)}
-                                            className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                                            className="px-3 py-2.5 rounded-full text-sm font-semibold transition-all"
                                             style={{
                                                 background: activeKeyProvider === provider ? 'rgba(16,185,129,0.12)' : 'var(--bg-elevated)',
                                                 border: `1px solid ${activeKeyProvider === provider ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
@@ -1287,7 +1287,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                         <div className="flex items-center gap-2">
                                             <button
                                                 type="button"
-                                                className="btn-secondary text-xs"
+                                                className="btn-secondary text-sm"
                                                 onClick={handleTestPuter}
                                                 disabled={puterState === 'testing'}
                                             >
@@ -1315,13 +1315,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                             placeholder={savedKeyProviders[activeKeyProvider]
                                                 ? 'A key is already stored securely. Paste a new key only if you want to replace it.'
                                                 : `Paste your ${providerLabelMap[activeKeyProvider]} API key here...`}
-                                            className="textarea-field min-h-[90px] font-mono text-xs"
+                                            className="textarea-field min-h-[90px] font-mono"
                                             style={{ letterSpacing: '0.02em' }}
                                         />
                                         <div className="flex flex-wrap items-center gap-2">
                                             <button
                                                 type="button"
-                                                className="btn-secondary text-xs"
+                                                className="btn-secondary text-sm"
                                                 onClick={() => handleTestProvider(activeKeyProvider)}
                                                 disabled={apiTestState[activeKeyProvider] === 'testing'}
                                             >
@@ -1332,7 +1332,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                             {savedKeyProviders[activeKeyProvider] && (
                                                 <button
                                                     type="button"
-                                                    className="btn-secondary text-xs"
+                                                    className="btn-secondary text-sm"
                                                     onClick={() => handleRemoveSavedKey(activeKeyProvider)}
                                                 >
                                                     Remove Saved Key

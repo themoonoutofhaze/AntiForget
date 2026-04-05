@@ -641,7 +641,7 @@ function App() {
                     )
                 )}
                 {currentView === 'settings' && (
-                    <div className="settings-section-container p-6">
+                    <div className="settings-section-container p-3 sm:p-6">
                         <SettingsPanel
                             theme={theme}
                             themeMode={themeMode}

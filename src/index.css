@@ -1332,6 +1332,17 @@
     min-height: 52px;
   }
 
+  [role="switch"]::after {
+    content: '';
+    position: absolute;
+    inset: -10px;
+    border-radius: inherit;
+  }
+
+  .priority-draggable-row {
+    padding: 14px 12px;
+  }
+
   input,
   textarea,
   select {
