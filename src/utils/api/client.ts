@@ -7,6 +7,20 @@ const parseError = (status: number, text: string) => {
   const looksLikeHtml = body.startsWith('<!DOCTYPE html>') || body.startsWith('<html');
   const hasCannotPost = /cannot\s+(post|get|put|patch|delete)\s+/i.test(body);
 
+  if (body && (body.startsWith('{') || body.startsWith('['))) {
+    try {
+      const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
+      if (typeof parsed?.error === 'string' && parsed.error.trim()) {
+        return parsed.error.trim();
+      }
+      if (typeof parsed?.message === 'string' && parsed.message.trim()) {
+        return parsed.message.trim();
+      }
+    } catch {
+      // Ignore JSON parsing errors and fall back to plain text handling.
+    }
+  }
+
   if (looksLikeHtml && hasCannotPost) {
     return 'Backend API route was not found. Ensure the API server is running on port 8787 (use `npm run dev` to start both app and server).';
   }
@@ -18,6 +32,20 @@ const parseError = (status: number, text: string) => {
   return body || `Request failed: ${status}`;
 };
 
+const isSessionAuthError = (status: number, text: string) => {
+  if (status !== 401) {
+    return false;
+  }
+
+  const normalized = (text || '').toLowerCase();
+  if (!normalized.trim()) {
+    return true;
+  }
+
+  // Treat 401 as session/auth expiration only when the server response indicates auth context.
+  return /(session|token|sign\s*in|signin|authentication required|unauthorized|not authenticated|expired)/i.test(normalized);
+};
+
 const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const headers = new Headers(init?.headers);
 
@@ -26,20 +54,21 @@ const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
     headers,
   });
 
-  if (res.status === 401) {
-    // Only force a reload if there was a stale session (user stored locally but cookie gone).
-    // If already unauthenticated, just throw so the caller handles it gracefully.
-    const hadSession = !!localStorage.getItem('synapse_auth_user');
-    localStorage.removeItem('synapse_auth_user');
-    localStorage.removeItem('synapse_auth_token');
-    if (hadSession) {
-      window.location.reload();
-    }
-    throw new Error('Session expired. Please sign in again.');
-  }
-
   if (!res.ok) {
     const text = await res.text();
+
+    if (isSessionAuthError(res.status, text)) {
+      // Only force a reload if there was a stale session (user stored locally but cookie gone).
+      // If already unauthenticated, just throw so the caller handles it gracefully.
+      const hadSession = !!localStorage.getItem('synapse_auth_user');
+      localStorage.removeItem('synapse_auth_user');
+      localStorage.removeItem('synapse_auth_token');
+      if (hadSession) {
+        window.location.reload();
+      }
+      throw new Error('Session expired. Please sign in again.');
+    }
+
     throw new Error(parseError(res.status, text));
   }
 
