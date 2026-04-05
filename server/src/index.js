@@ -847,6 +847,11 @@ const buildProviderPayload = ({ provider, model, messages, temperature, maxToken
     payload.reasoning = { enabled: reasoning };
   }
 
+  if (provider === 'gemini' && typeof model === 'string' && model.toLowerCase().startsWith('gemma-4-')) {
+    // Keep only Gemini OpenAI-compat supported sampling fields.
+    payload.top_p = 0.95;
+  }
+
   return payload;
 };
 
@@ -863,7 +868,40 @@ const extractProviderText = (provider, parsed) => {
       .trim();
   }
 
-  return String(parsed?.choices?.[0]?.message?.content || '').trim();
+  const content = parsed?.choices?.[0]?.message?.content;
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+
+  // Some OpenAI-compatible providers (including Gemini compatibility modes)
+  // return content as an array of typed parts instead of a plain string.
+  if (Array.isArray(content)) {
+    const text = content
+      .map((part) => {
+        if (typeof part === 'string') {
+          return part;
+        }
+        if (part && typeof part.text === 'string') {
+          return part.text;
+        }
+        if (part?.type === 'text' && typeof part?.text?.value === 'string') {
+          return part.text.value;
+        }
+        if (part?.type === 'output_text' && typeof part?.text === 'string') {
+          return part.text;
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+
+    if (text) {
+      return text;
+    }
+  }
+
+  return '';
 };
 
 const generationSystemPrompt = `
@@ -908,6 +946,93 @@ You are a Socratic Tutor helping a student after they completed a revision quiz.
 - If asked for extra practice, give one focused question at a time unless the user asks for more.
 `;
 
+const isGemma4Model = (provider, model) => {
+  return provider === 'gemini' && typeof model === 'string' && model.toLowerCase().startsWith('gemma-4-');
+};
+
+const normalizeGeminiModelName = (model) => {
+  const raw = typeof model === 'string' ? model.trim() : '';
+  if (!raw) {
+    return '';
+  }
+
+  // Gemini model identifiers are case-sensitive in format expectations.
+  // Normalize common user-entered variants such as gemma-4-31B-it.
+  return raw.toLowerCase();
+};
+
+const GEMMA_QUESTION_FORMAT_PROMPT = [
+  'Gemma-specific output requirements:',
+  '- Return exactly 3 lines in this exact format and order:',
+  'Q1 (CONCEPTUAL): <question>',
+  'Q2 (APPLIED): <question>',
+  'Q3 (CONNECTION): <question>',
+  '- Each line must contain exactly one question and end with a question mark.',
+  '- Do not include markdown, bullets, JSON, code fences, prefaces, or outro text.',
+  '- Do not output any thinking or control tags (for example: <|think|>, <|channel>thought, <channel|>).',
+].join('\n');
+
+const applyGemmaQuestionHandling = (messages = []) => {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return messages;
+  }
+
+  return messages.map((message, index) => {
+    if (index === 0 && message?.role === 'system' && typeof message?.content === 'string') {
+      return {
+        ...message,
+        content: `${message.content}\n${GEMMA_QUESTION_FORMAT_PROMPT}`,
+      };
+    }
+    return message;
+  });
+};
+
+const normalizeGemmaOutputText = (text) => {
+  const raw = String(text || '');
+  if (!raw.trim()) {
+    return '';
+  }
+
+  return raw
+    .replace(/```(?:json|text)?/gi, '')
+    .replace(/```/g, '')
+    .replace(/<\|channel\>thought[\s\S]*?<channel\|>/gi, '')
+    .replace(/<\|[^\n>]*\|>/g, '')
+    .replace(/<channel\|>/g, '')
+    .replace(/\r/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
+
+const formatParsedQuestionsForClient = (questions = []) => {
+  const byIndex = new Map();
+  for (const q of questions) {
+    if (!q || typeof q.index !== 'number' || typeof q.content !== 'string') {
+      continue;
+    }
+    if (q.index >= 1 && q.index <= 3 && !byIndex.has(q.index)) {
+      byIndex.set(q.index, q.content.trim());
+    }
+  }
+
+  const labels = {
+    1: 'CONCEPTUAL',
+    2: 'APPLIED',
+    3: 'CONNECTION',
+  };
+
+  const lines = [];
+  for (const index of [1, 2, 3]) {
+    const content = byIndex.get(index);
+    if (!content) {
+      return '';
+    }
+    lines.push(`Q${index} (${labels[index]}): ${content}`);
+  }
+  return lines.join('\n');
+};
+
 const parseStructuredQuestions = (text) => {
   const cleanText = String(text || '').replace(/\*/g, '');
   const regex = /(?:^|\n)\s*(?:Q)?([1-3])\s*(?:\([^)]*\))?\s*[:.)-]\s*([\s\S]*?)(?=(?:\n\s*(?:Q)?[1-3]\s*(?:\([^)]*\))?\s*[:.)-])|$)/gi;
@@ -919,6 +1044,25 @@ const parseStructuredQuestions = (text) => {
       questions.push({ index, content });
     }
   }
+
+  if (questions.length > 0) {
+    return questions;
+  }
+
+  // Fallback for providers that return "1. ... 2. ... 3. ..." without Q-labels.
+  const numberedRegex = /(?:^|\n)\s*([1-3])\s*[.)-]\s*([\s\S]*?)(?=(?:\n\s*[1-3]\s*[.)-])|$)/g;
+  for (const match of cleanText.matchAll(numberedRegex)) {
+    const index = Number(match[1]);
+    const content = String(match[2] || '').trim();
+    if (index >= 1 && index <= 3 && content) {
+      questions.push({ index, content });
+    }
+  }
+
+  if (questions.length > 0) {
+    return questions;
+  }
+
   return questions;
 };
 
@@ -2593,6 +2737,10 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
     for (const candidate of candidateQueue) {
       const provider = candidate.provider;
       const apiKey = credentialMap[provider];
+      const isGemmaModel = isGemma4Model(candidate.provider, candidate.model);
+      const requestModel = provider === 'gemini'
+        ? normalizeGeminiModelName(candidate.model)
+        : candidate.model;
       
       const currentAttempt = {
         id: candidate.id,
@@ -2615,16 +2763,24 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
 
       const tokenLimit = candidate.reasoning ? 4096 : 1024;
       const nativeAttachment = shouldInjectTopicContext && providerSupportsNativeAttachment(candidate.provider, tutorAttachment);
-      const candidateMessages = nativeAttachment
+      let candidateMessages = nativeAttachment
         ? appendNativeAttachmentToClaudeMessages(messages, tutorAttachment)
         : messages;
+
+      if (isGemmaModel && resolvedMode === 'questions') {
+        candidateMessages = applyGemmaQuestionHandling(candidateMessages);
+      }
+
+      const candidateTemperature = isGemmaModel
+        ? 1.0
+        : (resolvedMode === 'questions' ? 0.2 : resolvedMode === 'chat' ? 0.3 : 0);
 
       currentAttempt.attachmentMode = nativeAttachment ? 'native-file' : (tutorAttachment ? 'text-fallback' : 'none');
       const payload = buildProviderPayload({
         provider: candidate.provider,
-        model: candidate.model,
+        model: requestModel,
         messages: candidateMessages,
-        temperature: resolvedMode === 'questions' ? 0.2 : resolvedMode === 'chat' ? 0.3 : 0,
+        temperature: candidateTemperature,
         maxTokens: tokenLimit,
         reasoning: Boolean(candidate.reasoning),
         isFirstTurn: resolvedMode === 'questions',
@@ -2633,7 +2789,12 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
       const requestController = new AbortController();
       const requestTimeoutMs = candidate.provider === 'nvidia'
         ? (resolvedMode === 'questions' ? 10000 : 45000)
-        : (resolvedMode === 'questions' ? 10000 : 14000);
+        : candidate.provider === 'gemini'
+          ? (isGemmaModel
+            ? (resolvedMode === 'questions' ? 40000 : 60000)
+            : (resolvedMode === 'questions' ? 20000 : 30000))
+          : (resolvedMode === 'questions' ? 10000 : 14000);
+      console.log(`[Model Selection] Timeout for ${candidate.id}: ${requestTimeoutMs}ms`);
       const timeoutId = setTimeout(() => requestController.abort(), requestTimeoutMs);
 
       let aiRes;
@@ -2661,11 +2822,13 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
       if (aiRes.ok) {
         const data = JSON.parse(raw);
         const generatedText = extractProviderText(candidate.provider, data);
+        const normalizedText = isGemmaModel ? normalizeGemmaOutputText(generatedText) : generatedText;
+        let clientText = normalizedText;
 
         // Validate text contains the required formats
         let isValid = true;
         if (resolvedMode === 'questions') {
-          const parsedQuestions = parseStructuredQuestions(generatedText);
+          const parsedQuestions = parseStructuredQuestions(normalizedText);
           if (parsedQuestions.length === 0) {
             currentAttempt.status = 422;
             currentAttempt.error = 'Response received but failed to parse into the 3 required question categories.';
@@ -2676,16 +2839,24 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
           if (parsedQuestions.length < 3) {
             isValid = false;
             console.log(`[Model Selection] ⚠️  ${candidate.id}: Only ${parsedQuestions.length}/3 questions parsed, marking invalid`);
+          } else if (isGemmaModel) {
+            const canonical = formatParsedQuestionsForClient(parsedQuestions);
+            if (!canonical) {
+              isValid = false;
+              console.log(`[Model Selection] ⚠️  ${candidate.id}: Gemma normalization failed to produce canonical 3-question format`);
+            } else {
+              clientText = canonical;
+            }
           }
         } else if (resolvedMode === 'grading') {
-          if (!/Score\s*:/i.test(generatedText)) isValid = false;
+          if (!/Score\s*:/i.test(normalizedText)) isValid = false;
         }
 
-        if (isValid && generatedText.trim()) {
+        if (isValid && clientText.trim()) {
           currentAttempt.status = 200;
           console.log(`[Model Selection] ✅ SUCCESS with ${candidate.id} (${currentAttempt.durationMs}ms)`);
           return res.json({
-            text: generatedText,
+            text: clientText,
             provider,
             model: candidate.model,
             generationMs: Date.now() - generationStartedAt,
