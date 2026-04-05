@@ -3,13 +3,39 @@ import { createPortal } from 'react-dom';
 import { DndContext, MouseSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { KeyRound, Moon, Save, Sun, Palette, CheckCircle2, HardDrive, Cloud, Clock3, GraduationCap, Bot, GripVertical, Plus, Trash2, ChevronDown, Loader2, Languages } from 'lucide-react';
+import { KeyRound, Moon, Save, Sun, Palette, CheckCircle2, HardDrive, Cloud, Clock3, GraduationCap, Bot, GripVertical, Plus, Trash2, ChevronDown, Loader2, Languages, Bell, BellOff, Zap } from 'lucide-react';
 import type { IconType } from 'react-icons';
 import * as SiIcons from 'react-icons/si';
-import { getStorage, updateStorage, type AiProvider } from '../../utils/storage';
-import { apiDelete, apiGet } from '../../utils/api/client';
+import { getStorage, updateStorage, type AiProvider, type QuestionDifficulty } from '../../utils/storage';
+import { apiDelete, apiGet, apiPost } from '../../utils/api/client';
 import { addUserModel, deleteUserModel, getApiCredentialStatus, getUserModels, saveApiCredential, saveModelPrioritySettings, testApiConnectivity, type ModelProvider, type PrioritizedModelCandidate } from '../../utils/gemini';
 import { isPuterAvailable, puterChat } from '../../utils/puter';
+
+const urlBase64ToUint8Array = (base64String: string): Uint8Array => {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = atob(base64);
+    return new Uint8Array([...rawData].map((c) => c.charCodeAt(0)));
+};
+
+const SW_READY_TIMEOUT_MS = 8000;
+
+const doSubscribe = async (vapidPublicKey: string): Promise<PushSubscription> => {
+    const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(
+            'Service worker did not activate in time. ' +
+            'In development mode, push notifications require a production build (npm run build && npm start).' +
+            ' In production, try reloading the page.'
+        )), SW_READY_TIMEOUT_MS)
+    );
+    const reg = await Promise.race([navigator.serviceWorker.ready, timeout]);
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) return existing;
+    return reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) as unknown as ArrayBuffer,
+    });
+};
 
 interface SettingsPanelProps {
     theme: 'light' | 'dark';
@@ -125,6 +151,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
     const [studentEducationLevel, setStudentEducationLevel] = useState('high school');
     const [studentMajor, setStudentMajor] = useState('');
     const [aiLanguage, setAiLanguage] = useState('English');
+    const [questionDifficulty, setQuestionDifficulty] = useState<QuestionDifficulty>('doesnt_matter');
+    const [revisionReminderEnabled, setRevisionReminderEnabled] = useState(false);
+    const [revisionReminderTime, setRevisionReminderTime] = useState('09:00');
+    const [notifPermission, setNotifPermission] = useState<NotificationPermission>('default');
+    const [notifSubState, setNotifSubState] = useState<'idle' | 'subscribing' | 'subscribed' | 'error'>('idle');
+    const [notifSubMessage, setNotifSubMessage] = useState('');
+    const [notifTestState, setNotifTestState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
     const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
     const [providerModels, setProviderModels] = useState<Record<AiProvider, string>>({
         openai: 'gpt-oss-120b',
@@ -298,6 +331,21 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
             setStudentEducationLevel((storage.studentEducationLevel || 'high school').trim() || 'high school');
             setStudentMajor(storage.studentMajor || '');
             setAiLanguage((storage.aiLanguage || 'English').trim() || 'English');
+            setQuestionDifficulty(storage.questionDifficulty || 'doesnt_matter');
+            setRevisionReminderEnabled(Boolean(storage.revisionReminderEnabled));
+            setRevisionReminderTime(storage.revisionReminderTime || '09:00');
+            if (typeof Notification !== 'undefined') {
+                setNotifPermission(Notification.permission);
+                if (Notification.permission === 'granted' && 'serviceWorker' in navigator && 'PushManager' in window) {
+                    try {
+                        const reg = await navigator.serviceWorker.getRegistration('/sw.js');
+                        if (reg) {
+                            const existingSub = await reg.pushManager.getSubscription();
+                            if (existingSub) setNotifSubState('subscribed');
+                        }
+                    } catch { /* ignore */ }
+                }
+            }
             setProviderModels({
                 openai: storage.aiModelOverrides.openai || 'gpt-oss-120b',
                 groq: storage.aiModelOverrides.groq || 'openai/gpt-oss-120b',
@@ -408,6 +456,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                 studentEducationLevel: studentEducationLevel.trim() || 'high school',
                 studentMajor: studentMajor.trim(),
                 aiLanguage: aiLanguage.trim() || 'English',
+                questionDifficulty,
+                revisionReminderEnabled,
+                revisionReminderTime,
             });
 
             const saveOps: Promise<unknown>[] = [];
@@ -952,6 +1003,218 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                     />
                                 </div>
 
+                            </div>
+
+                            <div className="rounded-xl p-4 space-y-4" style={subsectionPanelStyle}>
+                                <div className="flex items-center gap-2">
+                                    <Zap className="w-4 h-4" style={{ color: '#f59e0b' }} />
+                                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Question Difficulty</p>
+                                </div>
+                                <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                                    Controls how challenging the AI's questions are for each revision session.
+                                </p>
+                                <div className="grid grid-cols-1 gap-2">
+                                    {([
+                                        { value: 'doesnt_matter', label: "Doesn't Matter", desc: 'No difficulty instruction is added to the prompt.' },
+                                        { value: 'easy', label: 'Easy', desc: 'Introductory questions testing basic recall and understanding.' },
+                                        { value: 'medium', label: 'Medium', desc: 'Questions requiring reasoning and application of concepts.' },
+                                        { value: 'hard', label: 'Hard', desc: 'Advanced questions requiring deep understanding and synthesis.' },
+                                        { value: 'auto', label: 'Auto', desc: 'Starts easy for new topics, ramps up as you review more and perform better.' },
+                                    ] as { value: QuestionDifficulty; label: string; desc: string }[]).map(({ value, label, desc }) => (
+                                        <button
+                                            key={value}
+                                            type="button"
+                                            onClick={() => setQuestionDifficulty(value)}
+                                            className="w-full text-left rounded-lg px-3 py-2.5 transition-all"
+                                            style={{
+                                                background: questionDifficulty === value ? 'rgba(245,158,11,0.10)' : 'var(--bg-elevated)',
+                                                border: `1px solid ${questionDifficulty === value ? '#f59e0b' : 'var(--border-subtle)'}`,
+                                            }}
+                                        >
+                                            <p className="text-xs font-semibold" style={{ color: questionDifficulty === value ? '#f59e0b' : 'var(--text-primary)' }}>{label}</p>
+                                            <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{desc}</p>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="rounded-xl p-4 space-y-4" style={subsectionPanelStyle}>
+                                <div className="flex items-center gap-2">
+                                    <Bell className="w-4 h-4" style={{ color: '#8b5cf6' }} />
+                                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Revision Reminder</p>
+                                </div>
+                                <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                                    Get a daily push notification to remind you to revise. Works on Mac, Windows, Android, and iOS (when installed as a PWA).
+                                </p>
+
+                                <div className="flex items-center justify-between gap-3">
+                                    <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Enable daily reminder</span>
+                                    <button
+                                        type="button"
+                                        role="switch"
+                                        aria-checked={revisionReminderEnabled}
+                                        onClick={() => setRevisionReminderEnabled((prev) => !prev)}
+                                        className="relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors"
+                                        style={{ background: revisionReminderEnabled ? '#8b5cf6' : 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}
+                                    >
+                                        <span
+                                            className="inline-block h-4 w-4 rounded-full bg-white shadow transition-transform"
+                                            style={{ transform: revisionReminderEnabled ? 'translateX(22px)' : 'translateX(2px)', margin: '3px 0 0 0' }}
+                                        />
+                                    </button>
+                                </div>
+
+                                {revisionReminderEnabled && (
+                                    <div className="space-y-2">
+                                        <label htmlFor="reminder-time" className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
+                                            Reminder time
+                                        </label>
+                                        <input
+                                            id="reminder-time"
+                                            type="time"
+                                            value={revisionReminderTime}
+                                            onChange={(e) => setRevisionReminderTime(e.target.value)}
+                                            className="input-field"
+                                            style={{ maxWidth: 140 }}
+                                        />
+                                    </div>
+                                )}
+
+                                <div className="space-y-2">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                                            Notification permission:&nbsp;
+                                            <span style={{ color: notifPermission === 'granted' ? 'var(--accent-primary)' : notifPermission === 'denied' ? '#ef4444' : 'var(--text-secondary)', fontWeight: 600 }}>
+                                                {notifPermission === 'granted' ? 'Granted' : notifPermission === 'denied' ? 'Denied' : 'Not granted'}
+                                            </span>
+                                        </span>
+                                    </div>
+                                    {notifPermission !== 'granted' && (
+                                        <button
+                                            type="button"
+                                            className="btn-secondary text-xs"
+                                            disabled={notifSubState === 'subscribing'}
+                                            onClick={async () => {
+                                                setNotifSubState('subscribing');
+                                                setNotifSubMessage('');
+                                                try {
+                                                    if (typeof Notification === 'undefined' || !('serviceWorker' in navigator)) {
+                                                        setNotifSubState('error');
+                                                        setNotifSubMessage('Push notifications are not supported in this browser.');
+                                                        return;
+                                                    }
+                                                    const permission = await Notification.requestPermission();
+                                                    setNotifPermission(permission);
+                                                    if (permission !== 'granted') {
+                                                        setNotifSubState('error');
+                                                        setNotifSubMessage('Permission denied. Please enable notifications in your browser settings.');
+                                                        return;
+                                                    }
+                                                    const vapidData = await apiGet<{ publicKey: string }>('/push/vapid-key');
+                                                    const sub = await doSubscribe(vapidData.publicKey);
+                                                    const subJson = sub.toJSON() as unknown as Record<string, unknown>;
+                                                    await Promise.all([
+                                                        apiPost('/push/subscribe', { ...subJson, utcOffsetMinutes: -new Date().getTimezoneOffset() }),
+                                                        updateStorage({ revisionReminderEnabled: true, revisionReminderTime }),
+                                                    ]);
+                                                    setRevisionReminderEnabled(true);
+                                                    setNotifSubState('subscribed');
+                                                    setNotifSubMessage('Subscribed! Notifications will fire at your chosen time.');
+                                                } catch (err: any) {
+                                                    setNotifSubState('error');
+                                                    setNotifSubMessage(err?.message || 'Failed to subscribe to notifications.');
+                                                }
+                                            }}
+                                        >
+                                            {notifSubState === 'subscribing' ? 'Requesting…' : 'Request Permission & Subscribe'}
+                                        </button>
+                                    )}
+                                    {notifPermission === 'granted' && notifSubState !== 'subscribed' && (
+                                        <button
+                                            type="button"
+                                            className="btn-secondary text-xs"
+                                            disabled={notifSubState === 'subscribing'}
+                                            onClick={async () => {
+                                                setNotifSubState('subscribing');
+                                                setNotifSubMessage('');
+                                                try {
+                                                    const vapidData = await apiGet<{ publicKey: string }>('/push/vapid-key');
+                                                    const sub = await doSubscribe(vapidData.publicKey);
+                                                    const subJson = sub.toJSON() as unknown as Record<string, unknown>;
+                                                    await Promise.all([
+                                                        apiPost('/push/subscribe', { ...subJson, utcOffsetMinutes: -new Date().getTimezoneOffset() }),
+                                                        updateStorage({ revisionReminderEnabled: true, revisionReminderTime }),
+                                                    ]);
+                                                    setRevisionReminderEnabled(true);
+                                                    setNotifSubState('subscribed');
+                                                    setNotifSubMessage('Subscribed! Notifications will fire at your chosen time.');
+                                                } catch (err: any) {
+                                                    setNotifSubState('error');
+                                                    setNotifSubMessage(err?.message || 'Failed to subscribe.');
+                                                }
+                                            }}
+                                        >
+                                            {notifSubState === 'subscribing' ? 'Subscribing…' : 'Enable Push Notifications'}
+                                        </button>
+                                    )}
+                                    {notifSubState === 'subscribed' && (
+                                        <div className="flex items-center gap-1.5">
+                                            <CheckCircle2 className="w-3.5 h-3.5" style={{ color: 'var(--accent-primary)' }} />
+                                            <span className="text-[11px]" style={{ color: 'var(--accent-primary)' }}>Push notifications enabled</span>
+                                        </div>
+                                    )}
+                                    {notifSubMessage && notifSubState !== 'subscribed' && (
+                                        <p className="text-[11px]" style={{ color: notifSubState === 'error' ? '#ef4444' : 'var(--text-muted)' }}>{notifSubMessage}</p>
+                                    )}
+                                    {notifPermission === 'denied' && (
+                                        <p className="text-[11px]" style={{ color: '#ef4444' }}>
+                                            Notifications are blocked. Please allow them in your browser/OS settings, then reload the page.
+                                        </p>
+                                    )}
+                                </div>
+
+                                {notifPermission === 'granted' && notifSubState === 'subscribed' && (
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            className="btn-secondary text-xs flex items-center gap-1.5"
+                                            disabled={notifTestState === 'sending'}
+                                            onClick={async () => {
+                                                setNotifTestState('sending');
+                                                try {
+                                                    await apiPost('/push/test', {});
+                                                    setNotifTestState('sent');
+                                                    setTimeout(() => setNotifTestState('idle'), 4000);
+                                                } catch (err: any) {
+                                                    setNotifTestState('error');
+                                                    setTimeout(() => setNotifTestState('idle'), 4000);
+                                                }
+                                            }}
+                                        >
+                                            <Bell className="w-3.5 h-3.5" />
+                                            {notifTestState === 'sending' ? 'Sending…' : notifTestState === 'sent' ? 'Sent!' : notifTestState === 'error' ? 'Failed' : 'Send Test Notification'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="btn-secondary text-xs flex items-center gap-1.5"
+                                            onClick={async () => {
+                                                try {
+                                                    const reg = await navigator.serviceWorker.ready;
+                                                    const sub = await reg.pushManager.getSubscription();
+                                                    if (sub) {
+                                                        await apiPost('/push/unsubscribe', { endpoint: sub.endpoint });
+                                                        await sub.unsubscribe();
+                                                    }
+                                                    setNotifSubState('idle');
+                                                    setNotifSubMessage('');
+                                                } catch { /* ignore */ }
+                                            }}
+                                        >
+                                            <BellOff className="w-3.5 h-3.5" />
+                                            Unsubscribe
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

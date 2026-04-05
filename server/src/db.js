@@ -366,11 +366,22 @@ const ensureSchema = async (db) => {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      user_id TEXT NOT NULL,
+      endpoint TEXT NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TEXT NOT NULL ${nowTextDefault},
+      PRIMARY KEY (user_id, endpoint),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_topics_user ON topics(user_id);
     CREATE INDEX IF NOT EXISTS idx_relations_user ON topic_relations(user_id);
     CREATE INDEX IF NOT EXISTS idx_fsrs_user_due ON fsrs_records(user_id, due);
     CREATE INDEX IF NOT EXISTS idx_user_model_priorities_order ON user_model_priorities(user_id, sort_order);
     CREATE INDEX IF NOT EXISTS idx_user_revision_models_user ON user_revision_models(user_id);
+    CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
   `);
 
   await db.exec(`
@@ -383,6 +394,10 @@ const ensureSchema = async (db) => {
     ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS student_major TEXT NOT NULL DEFAULT '';
     ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS ai_model_priority_json TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE user_auth_credentials ADD COLUMN IF NOT EXISTS kdf_version INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS question_difficulty TEXT NOT NULL DEFAULT 'doesnt_matter';
+    ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS revision_reminder_enabled INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS revision_reminder_time TEXT NOT NULL DEFAULT '09:00';
+    ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS utc_offset_minutes INTEGER NOT NULL DEFAULT 0;
   `);
 
   const legacyRows = await db.all(

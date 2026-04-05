@@ -83,6 +83,9 @@ export interface TutorTopicContext {
     studentMajor: string;
     aiLanguage?: string;
     missedQuestionHistory: string[];
+    questionDifficulty?: 'easy' | 'medium' | 'hard' | 'doesnt_matter' | 'auto';
+    topicReps?: number;
+    topicFsrsDifficulty?: number;
 }
 
 export interface AiAttempt {
@@ -134,6 +137,23 @@ const chatSystemPrompt = [
     '- If the student asks for practice, provide one focused question at a time unless they ask for more.',
     '- Stay grounded in the provided topic and quiz context when available.',
 ].join('\n');
+
+const resolveEffectiveDifficulty = (
+    difficulty: string | undefined,
+    reps: number,
+    fsrsDifficulty: number,
+): 'easy' | 'medium' | 'hard' | null => {
+    if (!difficulty || difficulty === 'doesnt_matter') return null;
+    if (difficulty === 'easy') return 'easy';
+    if (difficulty === 'medium') return 'medium';
+    if (difficulty === 'hard') return 'hard';
+    if (difficulty === 'auto') {
+        if (reps < 3) return 'easy';
+        if (reps < 7) return fsrsDifficulty > 6 ? 'easy' : 'medium';
+        return fsrsDifficulty > 6 ? 'medium' : 'hard';
+    }
+    return null;
+};
 
 const buildTutorPrompt = (
     history: { role: 'user' | 'model', parts: { text: string }[] }[],
@@ -191,6 +211,19 @@ const buildTutorPrompt = (
     }
 
     const languageInstruction = `- Generate all output in ${aiLanguage}.`;
+
+    let difficultyInstruction: string | null = null;
+    if (mode === 'questions' && topicContext) {
+        const effectiveDifficulty = resolveEffectiveDifficulty(
+            topicContext.questionDifficulty,
+            topicContext.topicReps ?? 0,
+            topicContext.topicFsrsDifficulty ?? 5,
+        );
+        if (effectiveDifficulty === 'easy') difficultyInstruction = '- Ask easy, introductory-level questions that test basic recall and understanding.';
+        else if (effectiveDifficulty === 'medium') difficultyInstruction = '- Ask medium-level questions that require some reasoning and application of concepts.';
+        else if (effectiveDifficulty === 'hard') difficultyInstruction = '- Ask challenging, advanced questions that require deep understanding, synthesis, and critical thinking.';
+    }
+
     const systemPrompt = [
         mode === 'questions'
             ? generationSystemPrompt
@@ -198,7 +231,8 @@ const buildTutorPrompt = (
                 ? gradingSystemPrompt
                 : chatSystemPrompt,
         languageInstruction,
-    ].join('\n');
+        difficultyInstruction,
+    ].filter(Boolean).join('\n');
     const serializedHistory = (history || [])
         .slice(-6)
         .map((entry) => {

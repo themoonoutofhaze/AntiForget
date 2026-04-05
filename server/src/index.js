@@ -14,6 +14,7 @@ import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import webpush from 'web-push';
 import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
 import { OAuth2Client as GoogleOAuthClient } from 'google-auth-library';
 
@@ -21,6 +22,14 @@ import { config, hasGoogleDriveConfig } from './config.js';
 import { decryptText, encryptText } from './crypto.js';
 import { ensureUser, getDb } from './db.js';
 import { buildModelQueue, getModelsForProviders, sanitizeUserModels } from './models.js';
+
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
+const VAPID_EMAIL = process.env.VAPID_EMAIL || 'mailto:admin@antiforget.app';
+
+if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails(VAPID_EMAIL, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+}
 
 const projectRootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const clientDistDir = path.join(projectRootDir, 'dist');
@@ -436,7 +445,7 @@ const getStorageBundle = async (userId) => {
   const db = await getDb();
 
   const pref = await db.get(
-      `SELECT completed_revisions_today, revision_seconds_today, daily_revision_minutes_limit, last_revision_date, student_education_level, student_major, student_focus_topic, ai_language, missed_questions_json, ai_provider, ai_model_overrides_json
+      `SELECT completed_revisions_today, revision_seconds_today, daily_revision_minutes_limit, last_revision_date, student_education_level, student_major, student_focus_topic, ai_language, missed_questions_json, ai_provider, ai_model_overrides_json, question_difficulty, revision_reminder_enabled, revision_reminder_time
        FROM user_preferences WHERE user_id = ?`,
     [userId]
   );
@@ -505,6 +514,9 @@ const getStorageBundle = async (userId) => {
     openrouterApiKey: null,
     geminiApiKey: null,
     claudeApiKey: null,
+    questionDifficulty: pref?.question_difficulty || 'doesnt_matter',
+    revisionReminderEnabled: Boolean(pref?.revision_reminder_enabled),
+    revisionReminderTime: pref?.revision_reminder_time || '09:00',
   };
 };
 
@@ -1743,10 +1755,13 @@ app.patch('/api/app/storage', async (req, res) => {
       typeof payload.ai_language === 'string' ||
       typeof payload.missedQuestionHistoryByTopic !== 'undefined' ||
       typeof payload.aiProvider === 'string' ||
-      typeof payload.aiModelOverrides !== 'undefined'
+      typeof payload.aiModelOverrides !== 'undefined' ||
+      typeof payload.questionDifficulty === 'string' ||
+      typeof payload.revisionReminderEnabled === 'boolean' ||
+      typeof payload.revisionReminderTime === 'string'
     ) {
       const currentPref = await db.get(
-        `SELECT completed_revisions_today, revision_seconds_today, daily_revision_minutes_limit, last_revision_date, student_education_level, student_major, student_focus_topic, ai_language, missed_questions_json, ai_provider, ai_model_overrides_json
+        `SELECT completed_revisions_today, revision_seconds_today, daily_revision_minutes_limit, last_revision_date, student_education_level, student_major, student_focus_topic, ai_language, missed_questions_json, ai_provider, ai_model_overrides_json, question_difficulty, revision_reminder_enabled, revision_reminder_time
            FROM user_preferences WHERE user_id = ?`,
         [userId]
       );
@@ -1768,6 +1783,9 @@ app.patch('/api/app/storage', async (req, res) => {
                 missed_questions_json = ?,
                 ai_provider = ?,
                 ai_model_overrides_json = ?,
+                question_difficulty = ?,
+                revision_reminder_enabled = ?,
+                revision_reminder_time = ?,
                 updated_at = CURRENT_TIMESTAMP
           WHERE user_id = ?`,
         [
@@ -1804,6 +1822,15 @@ app.patch('/api/app/storage', async (req, res) => {
           typeof payload.aiModelOverrides === 'object'
             ? JSON.stringify(payload.aiModelOverrides)
             : (currentPref?.ai_model_overrides_json || '{}'),
+          ['easy', 'medium', 'hard', 'doesnt_matter', 'auto'].includes(payload.questionDifficulty)
+            ? payload.questionDifficulty
+            : (currentPref?.question_difficulty || 'doesnt_matter'),
+          typeof payload.revisionReminderEnabled === 'boolean'
+            ? (payload.revisionReminderEnabled ? 1 : 0)
+            : (currentPref?.revision_reminder_enabled ?? 0),
+          typeof payload.revisionReminderTime === 'string' && /^\d{2}:\d{2}$/.test(payload.revisionReminderTime)
+            ? payload.revisionReminderTime
+            : (currentPref?.revision_reminder_time || '09:00'),
           userId,
         ]
       );
@@ -2913,6 +2940,177 @@ if (fs.existsSync(clientDistDir)) {
     return res.sendFile(path.join(clientDistDir, 'index.html'));
   });
 }
+
+/* ── Push Notification Routes ── */
+
+app.get('/api/app/push/vapid-key', (req, res) => {
+  if (!VAPID_PUBLIC_KEY) {
+    return res.status(503).json({ error: 'Push notifications are not configured on this server.' });
+  }
+  return res.json({ publicKey: VAPID_PUBLIC_KEY });
+});
+
+app.post('/api/app/push/subscribe', async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+    const { endpoint, keys, utcOffsetMinutes } = req.body || {};
+    if (!endpoint || typeof endpoint !== 'string' || !keys?.p256dh || !keys?.auth) {
+      return res.status(400).json({ error: 'Invalid subscription object.' });
+    }
+    const offsetMinutes = typeof utcOffsetMinutes === 'number' && Number.isFinite(utcOffsetMinutes)
+      ? Math.max(-840, Math.min(840, Math.round(utcOffsetMinutes)))
+      : 0;
+
+    await ensureUser(userId);
+    const db = await getDb();
+    await db.run(
+      `INSERT INTO push_subscriptions(user_id, endpoint, p256dh, auth, utc_offset_minutes, created_at)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP::text)
+       ON CONFLICT(user_id, endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, utc_offset_minutes = excluded.utc_offset_minutes`,
+      [userId, endpoint, keys.p256dh, keys.auth, offsetMinutes]
+    );
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error('[Push] subscribe error:', error);
+    return res.status(500).json({ error: 'Failed to save subscription.' });
+  }
+});
+
+app.post('/api/app/push/unsubscribe', async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+    const { endpoint } = req.body || {};
+    if (!endpoint) return res.status(400).json({ error: 'endpoint is required' });
+
+    const db = await getDb();
+    await db.run(
+      `DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?`,
+      [userId, endpoint]
+    );
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error('[Push] unsubscribe error:', error);
+    return res.status(500).json({ error: 'Failed to remove subscription.' });
+  }
+});
+
+/* ── Daily Reminder Scheduler ── */
+
+const sendPushReminders = async () => {
+  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) return;
+
+  try {
+    const db = await getDb();
+    const nowUtc = new Date();
+    const hh = String(nowUtc.getUTCHours()).padStart(2, '0');
+    const mm = String(nowUtc.getUTCMinutes()).padStart(2, '0');
+    const currentTime = `${hh}:${mm}`;
+
+    const rows = await db.all(
+      `SELECT ps.user_id, ps.endpoint, ps.p256dh, ps.auth, ps.utc_offset_minutes,
+              up.revision_reminder_time
+       FROM push_subscriptions ps
+       JOIN user_preferences up ON up.user_id = ps.user_id
+       WHERE up.revision_reminder_enabled = 1`,
+      []
+    );
+
+    const matchingRows = rows.filter((row) => {
+      const offsetMs = (row.utc_offset_minutes || 0) * 60 * 1000;
+      const localDate = new Date(nowUtc.getTime() + offsetMs);
+      const localHH = String(localDate.getUTCHours()).padStart(2, '0');
+      const localMM = String(localDate.getUTCMinutes()).padStart(2, '0');
+      return `${localHH}:${localMM}` === row.revision_reminder_time;
+    });
+
+    const payload = JSON.stringify({
+      title: '🧠 Your memory is fading right now…',
+      body: 'Topics are waiting to be reinforced. A few minutes today keeps forgetting away forever.',
+      icon: '/icon-192.png',
+      badge: '/favicon-32x32.png',
+      url: '/',
+    });
+
+    for (const row of matchingRows) {
+      const subscription = {
+        endpoint: row.endpoint,
+        keys: { p256dh: row.p256dh, auth: row.auth },
+      };
+      try {
+        await webpush.sendNotification(subscription, payload);
+      } catch (err) {
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          await db.run(
+            `DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?`,
+            [row.user_id, row.endpoint]
+          );
+        } else {
+          console.error(`[Push] Failed to send to ${row.user_id}:`, err.message);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[Push] Scheduler error:', error);
+  }
+};
+
+setInterval(sendPushReminders, 60 * 1000);
+
+app.post('/api/internal/push/trigger', async (req, res) => {
+  const secret = req.headers['x-trigger-secret'];
+  if (process.env.TRIGGER_SECRET && secret !== process.env.TRIGGER_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  await sendPushReminders();
+  return res.json({ ok: true, ts: new Date().toISOString() });
+});
+
+app.post('/api/app/push/test', async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+      return res.status(503).json({ error: 'Push notifications are not configured on this server.' });
+    }
+
+    const db = await getDb();
+    const subs = await db.all(
+      `SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?`,
+      [userId]
+    );
+    if (subs.length === 0) {
+      return res.status(404).json({ error: 'No push subscriptions found. Please subscribe first.' });
+    }
+
+    const payload = JSON.stringify({
+      title: '✅ AntiForget notifications are live',
+      body: 'You\'ll be reminded at your chosen time. Your future self will thank you.',
+      icon: '/icon-192.png',
+      badge: '/favicon-32x32.png',
+      url: '/',
+    });
+
+    let sent = 0;
+    for (const sub of subs) {
+      try {
+        await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload);
+        sent++;
+      } catch (err) {
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          await db.run(`DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?`, [userId, sub.endpoint]);
+        }
+      }
+    }
+    return res.json({ ok: true, sent });
+  } catch (error) {
+    console.error('[Push] test error:', error);
+    return res.status(500).json({ error: 'Failed to send test notification.' });
+  }
+});
 
 app.listen(config.port, () => {
   console.log(`AntiForget API server running on http://localhost:${config.port}`);

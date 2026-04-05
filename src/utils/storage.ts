@@ -29,6 +29,7 @@ export interface FSRSRecord {
 }
 
 export type AiProvider = 'openai' | 'groq' | 'mistral' | 'nvidia' | 'openrouter' | 'gemini' | 'claude' | 'puter';
+export type QuestionDifficulty = 'easy' | 'medium' | 'hard' | 'doesnt_matter' | 'auto';
 
 export interface SynapseStorage {
     nodes: GraphNode[];
@@ -53,6 +54,9 @@ export interface SynapseStorage {
     openrouterApiKey: string | null;
     geminiApiKey: string | null;
     claudeApiKey: string | null;
+    questionDifficulty: QuestionDifficulty;
+    revisionReminderEnabled: boolean;
+    revisionReminderTime: string;
 }
 
 const DEFAULT_STATE: SynapseStorage = {
@@ -78,6 +82,9 @@ const DEFAULT_STATE: SynapseStorage = {
     openrouterApiKey: null,
     geminiApiKey: null,
     claudeApiKey: null,
+    questionDifficulty: 'doesnt_matter',
+    revisionReminderEnabled: false,
+    revisionReminderTime: '09:00',
 };
 
 export const getStorage = async (): Promise<SynapseStorage> => {

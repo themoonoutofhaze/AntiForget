@@ -315,6 +315,8 @@ export const SocraticArena: React.FC = () => {
             .map((id) => storage.nodes.find((n) => n.id === id)?.title || '')
             .filter(Boolean);
 
+        const fsrsRecord = storage.fsrsData[topicId];
+
         return {
             topicId,
             topicName: node?.title || 'Unknown topic',
@@ -325,6 +327,9 @@ export const SocraticArena: React.FC = () => {
             studentMajor: (storage.studentMajor || '').trim(),
             aiLanguage: (storage.aiLanguage || 'English').trim() || 'English',
             missedQuestionHistory: storage.missedQuestionHistoryByTopic[topicId] || [],
+            questionDifficulty: storage.questionDifficulty || 'doesnt_matter',
+            topicReps: fsrsRecord?.reps ?? 0,
+            topicFsrsDifficulty: fsrsRecord?.difficulty ?? 5,
         };
     };
 
