@@ -177,6 +177,8 @@ export const SocraticArena: React.FC = () => {
     const [isTimerActive, setIsTimerActive] = useState(false);
     const [isUnrecorded, setIsUnrecorded] = useState(false);
     const [isStarting, setIsStarting] = useState(false);
+    const [startingMode, setStartingMode] = useState<'review' | 'practice' | null>(null);
+    const [isExitingQuiz, setIsExitingQuiz] = useState(false);
 
     const activeRequestRef = useRef<AbortController | null>(null);
     const providerLabel = getProviderLabel(provider);
@@ -356,6 +358,7 @@ export const SocraticArena: React.FC = () => {
     /* ── Start quiz ── */
     const startQuiz = async (unrecorded = false, dueNodeOverride?: string[]) => {
         setIsStarting(true);
+        setStartingMode(unrecorded ? 'practice' : 'review');
         let nextId: string | null = null;
         if (unrecorded) {
             const storage = await getStorage();
@@ -417,6 +420,7 @@ export const SocraticArena: React.FC = () => {
         } finally {
             if (activeRequestRef.current === controller) activeRequestRef.current = null;
             setIsStarting(false);
+            setStartingMode(null);
         }
     };
 
@@ -558,6 +562,19 @@ export const SocraticArena: React.FC = () => {
         setChatInput('');
         setIsChatSending(false);
         setChatError(null);
+        setIsStarting(false);
+        setStartingMode(null);
+        setIsExitingQuiz(false);
+    };
+
+    const handleExitQuiz = async () => {
+        if (isExitingQuiz) return;
+        setIsExitingQuiz(true);
+        try {
+            await resetToLobby();
+        } finally {
+            setIsExitingQuiz(false);
+        }
     };
 
     /* ══════════════════════════════════════════════════════════
@@ -737,7 +754,7 @@ export const SocraticArena: React.FC = () => {
                                         className="btn-primary gap-2 flex-1"
                                         disabled={isStarting}
                                         style={{ minWidth: 220 }}>
-                                        {isStarting ? (
+                                        {isStarting && startingMode === 'review' ? (
                                             <><div className="quiz-btn-spinner" /> Preparing…</>
                                         ) : (
                                             <><Target className="w-4 h-4" /> Start Review ({sessionMinutesLimit} min limit)</>
@@ -747,8 +764,11 @@ export const SocraticArena: React.FC = () => {
                                         className="btn-secondary gap-2 flex-1"
                                         disabled={isStarting}
                                         style={{ minWidth: 220, background: 'transparent', borderColor: 'var(--border-default)' }}>
-                                        <Smile className="w-4 h-4" />
-                                        Practice Mode (Unrecorded)
+                                        {isStarting && startingMode === 'practice' ? (
+                                            <><div className="quiz-btn-spinner" /> Preparing…</>
+                                        ) : (
+                                            <><Smile className="w-4 h-4" /> Practice Mode (Unrecorded)</>
+                                        )}
                                     </button>
                                 </div>
                             </>
@@ -767,9 +787,13 @@ export const SocraticArena: React.FC = () => {
                                 </p>
                                 <button id="start-unrecorded-btn" onClick={() => startQuiz(true)}
                                     className="btn-secondary gap-2 mx-auto"
+                                    disabled={isStarting}
                                     style={{ minWidth: 200, width: '100%', maxWidth: 320 }}>
-                                    <Smile className="w-4 h-4" />
-                                    Practice Random Topic
+                                    {isStarting && startingMode === 'practice' ? (
+                                        <><div className="quiz-btn-spinner" /> Preparing…</>
+                                    ) : (
+                                        <><Smile className="w-4 h-4" /> Practice Random Topic</>
+                                    )}
                                 </button>
                             </div>
                         </div>
@@ -833,10 +857,18 @@ export const SocraticArena: React.FC = () => {
                                 {isTimerActive && (
                                     <Timer initialSeconds={sessionMinutesLimit * 60} isActive={isTimerActive} onComplete={handleTimeUp} />
                                 )}
-                                <button id="close-quiz-btn" onClick={resetToLobby}
-                                    className="font-semibold rounded-xl border quiz-exit-btn"
+                                <button id="close-quiz-btn" onClick={handleExitQuiz}
+                                    disabled={isExitingQuiz || isSubmitting}
+                                    className="font-semibold rounded-xl border quiz-exit-btn inline-flex items-center justify-center gap-2"
                                     style={{ borderColor: 'rgba(220,38,38,0.34)', color: '#dc2626', background: 'rgba(220,38,38,0.12)', padding: '10px 18px' }}>
-                                    Exit
+                                    {isExitingQuiz ? (
+                                        <>
+                                            <div className="quiz-btn-spinner" />
+                                            Exiting...
+                                        </>
+                                    ) : (
+                                        'Exit'
+                                    )}
                                 </button>
                             </div>
                         </div>
