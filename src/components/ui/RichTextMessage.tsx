@@ -1,11 +1,20 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import remarkBreaks from 'remark-breaks';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
-import rehypeSanitize from 'rehype-sanitize';
+
+const REMARK_PLUGINS = [remarkGfm, remarkMath, remarkBreaks];
+const REHYPE_PLUGINS = [rehypeRaw, rehypeKatex];
+const MD_COMPONENTS = {
+    table: ({ node: _node, ...props }: React.ComponentPropsWithoutRef<'table'> & { node?: unknown }) => (
+        <div className="chat-rich-table-wrapper">
+            <table {...props} />
+        </div>
+    ),
+};
 
 interface RichTextMessageProps {
     text: string;
@@ -29,20 +38,14 @@ const normalizeMathMarkdown = (input: string): string => {
 };
 
 export const RichTextMessage: React.FC<RichTextMessageProps> = ({ text }) => {
-    const normalizedText = normalizeMathMarkdown(text);
+    const normalizedText = useMemo(() => normalizeMathMarkdown(text), [text]);
 
     return (
         <div className="chat-rich">
             <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
-                rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeKatex]}
-                components={{
-                    table: ({ node: _node, ...props }) => (
-                        <div className="chat-rich-table-wrapper">
-                            <table {...props} />
-                        </div>
-                    ),
-                }}
+                remarkPlugins={REMARK_PLUGINS}
+                rehypePlugins={REHYPE_PLUGINS}
+                components={MD_COMPONENTS}
             >
                 {normalizedText}
             </ReactMarkdown>
