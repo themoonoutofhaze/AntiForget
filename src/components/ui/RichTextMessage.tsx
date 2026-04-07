@@ -20,6 +20,26 @@ interface RichTextMessageProps {
     text: string;
 }
 
+const normalizeTableMathPipes = (input: string): string => {
+    return input
+        .split('\n')
+        .map((line) => {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('|') || !line.includes('$')) {
+                return line;
+            }
+
+            return line.replace(/\$([^$\n]+)\$/g, (_match: string, math: string) => {
+                const normalizedMath = math.replace(
+                    /([A-Za-z0-9)\]}])\|([A-Za-z0-9()])/g,
+                    (_innerMatch: string, left: string, right: string) => `${left}\\mid ${right}`,
+                );
+                return `$${normalizedMath}$`;
+            });
+        })
+        .join('\n');
+};
+
 const normalizeMathMarkdown = (input: string): string => {
     let normalized = input;
 
@@ -33,6 +53,8 @@ const normalizeMathMarkdown = (input: string): string => {
         if (!looksLikeMath) return `${prefix}[\n${math}\n]`;
         return `${prefix}$$\n${candidate}\n$$`;
     });
+
+    normalized = normalizeTableMathPipes(normalized);
 
     return normalized;
 };

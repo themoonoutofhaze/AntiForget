@@ -989,7 +989,7 @@ export const SocraticArena: React.FC = () => {
             : 'Review complete.';
 
         return (
-            <div className="animate-slide-up w-full space-y-6 pb-8 page-nudge-scroll">
+            <div className="animate-slide-up w-full space-y-6 pb-8">
                 {/* Result banner */}
                 <div className="quiz-result-banner glass-card max-w-4xl mx-auto p-6 text-center space-y-2">
                     <div className="text-4xl">{overallEmoji}</div>
