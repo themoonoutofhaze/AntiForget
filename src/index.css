@@ -904,7 +904,7 @@
   border-collapse: collapse;
   width: 100%;
   font-size: 0.84em;
-  min-width: 360px;
+  table-layout: auto;
 }
 
 .chat-rich thead tr {
@@ -917,8 +917,9 @@
   text-align: left;
   font-weight: 600;
   color: var(--text-primary);
-  white-space: nowrap;
+  white-space: normal;
   vertical-align: bottom;
+  word-break: break-word;
 }
 
 .chat-rich td {
@@ -927,6 +928,8 @@
   color: var(--text-primary);
   vertical-align: top;
   line-height: 1.5;
+  word-break: break-word;
+  min-width: 60px;
 }
 
 .chat-rich tbody tr:last-child td {
