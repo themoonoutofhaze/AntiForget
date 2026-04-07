@@ -953,7 +953,7 @@ You are a Socratic Tutor evaluating user answers to revision questions.
 const chatSystemPrompt = `
 You are a Socratic Tutor helping a student after they completed a revision quiz.
 - Answer follow-up questions clearly and directly.
-- Give complete, thorough explanations adapted to student level. Do not cut your answer short.
+- Keep explanations concise, practical, and adapted to student level when possible
 - Use examples or analogies when they improve understanding.
 - If asked for extra practice, give one focused question at a time unless the user asks for more.
 `;
@@ -2788,7 +2788,7 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
         continue;
       }
 
-      const tokenLimit = candidate.reasoning ? 4096 : 1024;
+      const tokenLimit = candidate.reasoning ? 8192 : resolvedMode === 'chat' ? 4096 : 1024;
       const nativeAttachment = shouldInjectTopicContext && providerSupportsNativeAttachment(candidate.provider, tutorAttachment);
       let candidateMessages = nativeAttachment
         ? appendNativeAttachmentToClaudeMessages(messages, tutorAttachment)
