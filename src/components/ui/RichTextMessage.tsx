@@ -16,6 +16,8 @@ const normalizeMathMarkdown = (input: string): string => {
 
     normalized = normalized.replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, (_, math: string) => `\n$$\n${math.trim()}\n$$\n`);
 
+    normalized = normalized.replace(/\\\(([\s\S]*?)\\\)/g, (_, math: string) => `$${math}$`);
+
     normalized = normalized.replace(/(^|\n)\[\s*\n([\s\S]*?)\n\]\s*(?=\n|$)/g, (_, prefix: string, math: string) => {
         const candidate = math.trim();
         const looksLikeMath = /\\[a-zA-Z]+|[_^{}=]|\b(sin|cos|tan|log|ln|sum|prod|frac|sqrt|int)\b/.test(candidate);
@@ -34,6 +36,13 @@ export const RichTextMessage: React.FC<RichTextMessageProps> = ({ text }) => {
             <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
                 rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeKatex]}
+                components={{
+                    table: ({ node: _node, ...props }) => (
+                        <div className="chat-rich-table-wrapper">
+                            <table {...props} />
+                        </div>
+                    ),
+                }}
             >
                 {normalizedText}
             </ReactMarkdown>

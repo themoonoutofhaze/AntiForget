@@ -892,6 +892,65 @@
   overflow-y: hidden;
 }
 
+.chat-rich-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  margin: 0.8rem 0;
+  border-radius: 10px;
+  border: 1px solid var(--border-default);
+}
+
+.chat-rich table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.84em;
+  min-width: 360px;
+}
+
+.chat-rich thead tr {
+  background: rgba(255,255,255,0.06);
+  border-bottom: 2px solid var(--border-default);
+}
+
+.chat-rich th {
+  padding: 0.5rem 0.8rem;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.chat-rich td {
+  padding: 0.45rem 0.8rem;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  vertical-align: top;
+  line-height: 1.5;
+}
+
+.chat-rich tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.chat-rich tbody tr:hover td {
+  background: rgba(255,255,255,0.03);
+}
+
+.chat-rich h1,
+.chat-rich h2,
+.chat-rich h3,
+.chat-rich h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0.9rem 0 0.4rem;
+  color: var(--text-primary);
+}
+
+.chat-rich h1 { font-size: 1.15em; }
+.chat-rich h2 { font-size: 1.05em; }
+.chat-rich h3 { font-size: 0.97em; }
+
 /* ========================================
    LOADING DOTS
    ======================================== */
