@@ -1077,7 +1077,7 @@ export const SocraticArena: React.FC = () => {
 
                     {chatOpen && (
                         <div className="space-y-3">
-                            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                            <div className="space-y-2 max-h-[32rem] overflow-y-auto pr-1">
                                 {chatMessages.length === 0 && (
                                     <div className="text-sm rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)' }}>
                                         Ask anything about your mistakes, model answers, or request extra practice questions.
