@@ -398,6 +398,9 @@ const ensureSchema = async (db) => {
     ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS revision_reminder_enabled INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS revision_reminder_time TEXT NOT NULL DEFAULT '09:00';
     ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS utc_offset_minutes INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS completed_topics_today INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS max_topics_per_day INTEGER NOT NULL DEFAULT 5;
+    ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS lightning_review_enabled INTEGER NOT NULL DEFAULT 1;
   `);
 
   const legacyRows = await db.all(

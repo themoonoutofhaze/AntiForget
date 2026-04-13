@@ -28,6 +28,8 @@ export interface FSRSRecord {
     state: 'New' | 'Learning' | 'Review' | 'Relearning';
 }
 
+export type ReviewMode = 'standard' | 'lightning';
+
 export type AiProvider = 'openai' | 'groq' | 'mistral' | 'nvidia' | 'openrouter' | 'gemini' | 'claude' | 'puter';
 export type QuestionDifficulty = 'easy' | 'medium' | 'hard' | 'doesnt_matter' | 'auto';
 
@@ -36,8 +38,10 @@ export interface SynapseStorage {
     edges: GraphEdge[];
     fsrsData: Record<string, FSRSRecord>;
     completedRevisionsToday: number;
+    completedTopicsToday: number;
     revisionSecondsToday: number;
     dailyRevisionMinutesLimit: number;
+    maxTopicsPerDay: number;
     lastRevisionDate: string; // YYYY-MM-DD
     studentEducationLevel: string;
     studentMajor: string;
@@ -57,6 +61,7 @@ export interface SynapseStorage {
     questionDifficulty: QuestionDifficulty;
     revisionReminderEnabled: boolean;
     revisionReminderTime: string;
+    lightningReviewEnabled: boolean;
 }
 
 const DEFAULT_STATE: SynapseStorage = {
@@ -64,8 +69,10 @@ const DEFAULT_STATE: SynapseStorage = {
     edges: [],
     fsrsData: {},
     completedRevisionsToday: 0,
+    completedTopicsToday: 0,
     revisionSecondsToday: 0,
     dailyRevisionMinutesLimit: 60,
+    maxTopicsPerDay: 5,
     lastRevisionDate: new Date().toISOString().split('T')[0],
     studentEducationLevel: 'high school',
     studentMajor: '',
@@ -85,6 +92,7 @@ const DEFAULT_STATE: SynapseStorage = {
     questionDifficulty: 'doesnt_matter',
     revisionReminderEnabled: false,
     revisionReminderTime: '09:00',
+    lightningReviewEnabled: true,
 };
 
 export const getStorage = async (): Promise<SynapseStorage> => {

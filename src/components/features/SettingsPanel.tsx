@@ -147,6 +147,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
     const [geminiKeyInput, setGeminiKeyInput] = useState('');
     const [claudeKeyInput, setClaudeKeyInput] = useState('');
     const [dailyRevisionMinutesLimit, setDailyRevisionMinutesLimit] = useState(60);
+    const [maxTopicsPerDay, setMaxTopicsPerDay] = useState(5);
     const [revisionSecondsToday, setRevisionSecondsToday] = useState(0);
     const [studentEducationLevel, setStudentEducationLevel] = useState('high school');
     const [studentMajor, setStudentMajor] = useState('');
@@ -154,6 +155,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
     const [questionDifficulty, setQuestionDifficulty] = useState<QuestionDifficulty>('doesnt_matter');
     const [revisionReminderEnabled, setRevisionReminderEnabled] = useState(false);
     const [revisionReminderTime, setRevisionReminderTime] = useState('09:00');
+    const [lightningReviewEnabled, setLightningReviewEnabled] = useState(true);
     const [notifPermission, setNotifPermission] = useState<NotificationPermission>('default');
     const [notifSubState, setNotifSubState] = useState<'idle' | 'subscribing' | 'subscribed' | 'error'>('idle');
     const [notifSubMessage, setNotifSubMessage] = useState('');
@@ -327,6 +329,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
             const storage = await getStorage();
             setActiveKeyProvider(storage.aiProvider);
             setDailyRevisionMinutesLimit(Math.max(10, storage.dailyRevisionMinutesLimit || 60));
+            setMaxTopicsPerDay(Math.max(1, storage.maxTopicsPerDay || 5));
             setRevisionSecondsToday(Math.max(0, storage.revisionSecondsToday || 0));
             setStudentEducationLevel((storage.studentEducationLevel || 'high school').trim() || 'high school');
             setStudentMajor(storage.studentMajor || '');
@@ -334,6 +337,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
             setQuestionDifficulty(storage.questionDifficulty || 'doesnt_matter');
             setRevisionReminderEnabled(Boolean(storage.revisionReminderEnabled));
             setRevisionReminderTime(storage.revisionReminderTime || '09:00');
+            setLightningReviewEnabled(storage.lightningReviewEnabled ?? true);
             if (typeof Notification !== 'undefined') {
                 setNotifPermission(Notification.permission);
                 if (Notification.permission === 'granted' && 'serviceWorker' in navigator && 'PushManager' in window) {
@@ -453,12 +457,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
             // even if a later model/key/priority call encounters an issue.
             await updateStorage({
                 dailyRevisionMinutesLimit: clampDailyLimit(dailyRevisionMinutesLimit),
+                maxTopicsPerDay: Math.max(1, Math.min(20, maxTopicsPerDay)),
                 studentEducationLevel: studentEducationLevel.trim() || 'high school',
                 studentMajor: studentMajor.trim(),
                 aiLanguage: aiLanguage.trim() || 'English',
                 questionDifficulty,
                 revisionReminderEnabled,
                 revisionReminderTime,
+                lightningReviewEnabled,
             });
 
             const saveOps: Promise<unknown>[] = [];
@@ -935,7 +941,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                 <div className="grid grid-cols-1 md:grid-cols-[1fr_120px] gap-3 items-end">
                                     <div>
                                         <label htmlFor="daily-revision-limit" className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-                                            Daily limit (minutes)
+                                            Daily time limit (minutes)
                                         </label>
                                         <input
                                             id="daily-revision-limit"
@@ -958,6 +964,26 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                     />
                                 </div>
 
+                                <div className="grid grid-cols-1 md:grid-cols-[1fr_120px] gap-3 items-end">
+                                    <div>
+                                        <label htmlFor="max-topics-day" className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
+                                            Max topics per day
+                                        </label>
+                                        <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                                            Limits how many topics you review daily. Helps prevent burnout.
+                                        </p>
+                                    </div>
+                                    <input
+                                        id="max-topics-day"
+                                        type="number"
+                                        min={1}
+                                        max={20}
+                                        value={maxTopicsPerDay}
+                                        onChange={(e) => setMaxTopicsPerDay(Math.max(1, Math.min(20, Number(e.target.value))))}
+                                        className="input-field"
+                                    />
+                                </div>
+
                                 <div className="rounded-xl p-3" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
                                     <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-secondary)' }}>
                                         <span>Today</span>
@@ -966,6 +992,32 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ theme, themeMode, 
                                     <div style={{ marginTop: 8, height: 6, borderRadius: 999, background: 'rgba(16,185,129,0.12)', overflow: 'hidden' }}>
                                         <div style={{ height: '100%', width: `${spendPct}%`, background: 'var(--accent-primary)', borderRadius: 999, transition: 'width 250ms ease' }} />
                                     </div>
+                                </div>
+                            </div>
+
+                            <div className="rounded-xl p-4 space-y-4" style={subsectionPanelStyle}>
+                                <div className="flex items-center gap-2">
+                                    <Zap className="w-4 h-4" style={{ color: '#fbbf24' }} />
+                                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Lightning Review</p>
+                                </div>
+                                <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                                    Quick review mode with 1 question per topic. Great for busy days or rapid refreshers.
+                                </p>
+                                <div className="flex items-center justify-between gap-3">
+                                    <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Enable Lightning button</span>
+                                    <button
+                                        type="button"
+                                        role="switch"
+                                        aria-checked={lightningReviewEnabled}
+                                        onClick={() => setLightningReviewEnabled((prev) => !prev)}
+                                        className="relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors"
+                                        style={{ background: lightningReviewEnabled ? '#fbbf24' : 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}
+                                    >
+                                        <span
+                                            className="inline-block h-4 w-4 rounded-full bg-white shadow transition-transform"
+                                            style={{ transform: lightningReviewEnabled ? 'translateX(22px)' : 'translateX(2px)', margin: '3px 0 0 0' }}
+                                        />
+                                    </button>
                                 </div>
                             </div>
 

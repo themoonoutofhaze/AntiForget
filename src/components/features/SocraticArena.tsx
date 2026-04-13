@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Send, Target, KeyRound, CheckCircle2, ChevronRight, BookOpen, Star, Smile, AlertCircle, MessageCircle } from 'lucide-react';
 import { Timer } from '../ui/Timer';
 import { RichTextMessage } from '../ui/RichTextMessage';
-import { addRevisionSeconds, getTodaysReviews, processReview } from '../../utils/fsrs';
+import { addRevisionSeconds, getTodaysReviews, processReview, computeQuestionCount } from '../../utils/fsrs';
 import { getStorage, updateStorage, type AiProvider } from '../../utils/storage';
 import { calculateAverageScore, extractQuestionScores, generateTutorResponse, getApiCredentialStatus, getProviderLabel, getUserModels, saveApiCredential, type TutorTopicContext, type AiAttempt, type ModelProvider } from '../../utils/gemini';
 
@@ -177,8 +177,12 @@ export const SocraticArena: React.FC = () => {
     const [isTimerActive, setIsTimerActive] = useState(false);
     const [isUnrecorded, setIsUnrecorded] = useState(false);
     const [isStarting, setIsStarting] = useState(false);
-    const [startingMode, setStartingMode] = useState<'review' | 'practice' | null>(null);
+    const [startingMode, setStartingMode] = useState<'review' | 'practice' | 'lightning' | null>(null);
     const [isExitingQuiz, setIsExitingQuiz] = useState(false);
+    const [isLightningMode, setIsLightningMode] = useState(false);
+    const [maxTopicsPerDay, setMaxTopicsPerDay] = useState(5);
+    const [completedTopicsToday, setCompletedTopicsToday] = useState(0);
+    const [topicLimitReached, setTopicLimitReached] = useState(false);
 
     const activeRequestRef = useRef<AbortController | null>(null);
     const providerLabel = getProviderLabel(provider);
@@ -222,6 +226,13 @@ export const SocraticArena: React.FC = () => {
                 const dailyLimitMinutes = Math.max(10, storage.dailyRevisionMinutesLimit || 60);
                 setSessionMinutesLimit(dailyLimitMinutes);
                 setTimeBudgetReached(dueCount > 0 && storage.revisionSecondsToday >= dailyLimitMinutes * 60);
+
+                const maxTopics = Math.max(1, storage.maxTopicsPerDay || 5);
+                setMaxTopicsPerDay(maxTopics);
+                const completedToday = storage.completedTopicsToday || 0;
+                setCompletedTopicsToday(completedToday);
+                setTopicLimitReached(dueCount > 0 && completedToday >= maxTopics);
+                setIsLightningMode(storage.lightningReviewEnabled ?? true);
             } catch (error) {
                 console.error('Failed to load Socratic lobby state:', error);
             } finally {
@@ -303,7 +314,7 @@ export const SocraticArena: React.FC = () => {
         }
     };
 
-    const buildTopicContext = async (topicId: string): Promise<TutorTopicContext> => {
+    const buildTopicContext = async (topicId: string, isLightning: boolean = false): Promise<TutorTopicContext> => {
         const storage = await getStorage();
         const node = storage.nodes.find((n) => n.id === topicId);
         const linkedTopicIdSet = new Set<string>();
@@ -316,6 +327,7 @@ export const SocraticArena: React.FC = () => {
             .filter(Boolean);
 
         const fsrsRecord = storage.fsrsData[topicId];
+        const questionCount = computeQuestionCount(fsrsRecord, isLightning);
 
         return {
             topicId,
@@ -330,6 +342,8 @@ export const SocraticArena: React.FC = () => {
             questionDifficulty: storage.questionDifficulty || 'doesnt_matter',
             topicReps: fsrsRecord?.reps ?? 0,
             topicFsrsDifficulty: fsrsRecord?.difficulty ?? 5,
+            questionCount,
+            isLightning,
         };
     };
 
@@ -361,9 +375,9 @@ export const SocraticArena: React.FC = () => {
     };
 
     /* ── Start quiz ── */
-    const startQuiz = async (unrecorded = false, dueNodeOverride?: string[]) => {
+    const startQuiz = async (unrecorded = false, dueNodeOverride?: string[], lightning = false) => {
         setIsStarting(true);
-        setStartingMode(unrecorded ? 'practice' : 'review');
+        setStartingMode(lightning ? 'lightning' : unrecorded ? 'practice' : 'review');
         let nextId: string | null = null;
         if (unrecorded) {
             const storage = await getStorage();
@@ -378,6 +392,7 @@ export const SocraticArena: React.FC = () => {
 
         setCurrentNodeId(nextId);
         setIsUnrecorded(unrecorded);
+        setIsLightningMode(lightning);
         setSessionStartedAt(Date.now());
         setPhase('loading');
         setAnswers(['', '', '']);
@@ -394,7 +409,7 @@ export const SocraticArena: React.FC = () => {
         setChatError(null);
         activeRequestRef.current?.abort();
 
-        const topicContext = await buildTopicContext(nextId);
+        const topicContext = await buildTopicContext(nextId, lightning);
         setCurrentTopicName(topicContext.topicName || 'Unknown topic');
         const controller = new AbortController();
         activeRequestRef.current = controller;
@@ -539,7 +554,7 @@ export const SocraticArena: React.FC = () => {
             return;
         }
 
-        await startQuiz(false, nextDueNodes);
+        await startQuiz(false, nextDueNodes, isLightningMode);
     };
 
     const resetToLobby = async () => {
@@ -570,6 +585,7 @@ export const SocraticArena: React.FC = () => {
         setIsStarting(false);
         setStartingMode(null);
         setIsExitingQuiz(false);
+        setIsLightningMode(false);
     };
 
     const handleExitQuiz = async () => {
@@ -750,9 +766,17 @@ export const SocraticArena: React.FC = () => {
                             </div>
                         )}
 
-                        {dueNodes.length > 0 ? (
+                        {dueNodes.length > 0 && !topicLimitReached ? (
                             <>
-                            
+                                {/* Topic limit indicator */}
+                                {maxTopicsPerDay > 0 && (
+                                    <div className="text-xs mb-3 text-center" style={{ color: 'var(--text-muted)' }}>
+                                        Topics today: <span style={{ color: 'var(--accent-primary)' }}>{completedTopicsToday}</span>/{maxTopicsPerDay}
+                                        {completedTopicsToday >= maxTopicsPerDay - 1 && (
+                                            <span className="ml-1" style={{ color: 'var(--accent-secondary)' }}>— almost at limit</span>
+                                        )}
+                                    </div>
+                                )}
 
                                 <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
                                     <button id="start-session-btn" onClick={() => startQuiz(false)}
@@ -762,9 +786,21 @@ export const SocraticArena: React.FC = () => {
                                         {isStarting && startingMode === 'review' ? (
                                             <><div className="quiz-btn-spinner" /> Preparing…</>
                                         ) : (
-                                            <><Target className="w-4 h-4" /> Start Review ({sessionMinutesLimit} min limit)</>
+                                            <><Target className="w-4 h-4" /> Start Review ({sessionMinutesLimit} min)</>
                                         )}
                                     </button>
+                                    {isLightningMode && (
+                                        <button id="start-lightning-btn" onClick={() => startQuiz(false, undefined, true)}
+                                            className="btn-secondary gap-2 flex-1"
+                                            disabled={isStarting}
+                                            style={{ minWidth: 220, background: 'rgba(251, 191, 36, 0.1)', borderColor: 'rgba(251, 191, 36, 0.3)' }}>
+                                            {isStarting && startingMode === 'lightning' ? (
+                                                <><div className="quiz-btn-spinner" /> Preparing…</>
+                                            ) : (
+                                                <><span style={{ color: '#fbbf24' }}>⚡</span> Lightning (1 Q/topic)</>
+                                            )}
+                                    </button>
+                                    )}
                                     <button id="start-unrecorded-btn" onClick={() => startQuiz(true)}
                                         className="btn-secondary gap-2 flex-1"
                                         disabled={isStarting}
@@ -772,7 +808,7 @@ export const SocraticArena: React.FC = () => {
                                         {isStarting && startingMode === 'practice' ? (
                                             <><div className="quiz-btn-spinner" /> Preparing…</>
                                         ) : (
-                                            <><Smile className="w-4 h-4" /> Practice Mode (Unrecorded)</>
+                                            <><Smile className="w-4 h-4" /> Practice (Unrecorded)</>
                                         )}
                                     </button>
                                 </div>
@@ -781,7 +817,9 @@ export const SocraticArena: React.FC = () => {
                         <div className="space-y-3">
                             <div className="badge badge-green mx-auto">All caught up! 🎉</div>
                             <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                                {timeBudgetReached
+                                {topicLimitReached
+                                    ? `You've reached your daily topic limit of ${maxTopicsPerDay}. Increase it in Settings if you want to review more today.`
+                                    : timeBudgetReached
                                     ? 'You reached your daily revision time limit. Increase it in Settings if you want longer sessions today.'
                                     : 'No topics due right now. Come back later — great job staying on top of things!'}
                             </p>
@@ -880,7 +918,7 @@ export const SocraticArena: React.FC = () => {
                         {/* Row 2: Topic title */}
                         <div className="mt-3">
                             <h2 className="section-title text-xl md:text-2xl leading-tight">
-                                <span className="font-normal" style={{ color: 'var(--accent-primary)' }}>Revising</span>{' '}{currentTopicName || 'Unknown Topic'}{isUnrecorded && <span className="text-sm font-normal ml-2 opacity-60">(Practice Mode)</span>}
+                                <span className="font-normal" style={{ color: 'var(--accent-primary)' }}>Revising</span>{' '}{currentTopicName || 'Unknown Topic'}{isUnrecorded && <span className="text-sm font-normal ml-2 opacity-60">(Practice Mode)</span>}{isLightningMode && !isUnrecorded && <span className="text-sm font-normal ml-2 opacity-60">(Lightning)</span>}
                             </h2>
                             <div className="text-xs font-semibold mt-1" style={{ color: 'var(--text-secondary)' }}>
                                 {questionGenerationMs !== null && (

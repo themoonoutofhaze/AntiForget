@@ -445,7 +445,7 @@ const getStorageBundle = async (userId) => {
   const db = await getDb();
 
   const pref = await db.get(
-      `SELECT completed_revisions_today, revision_seconds_today, daily_revision_minutes_limit, last_revision_date, student_education_level, student_major, student_focus_topic, ai_language, missed_questions_json, ai_provider, ai_model_overrides_json, question_difficulty, revision_reminder_enabled, revision_reminder_time
+      `SELECT completed_revisions_today, completed_topics_today, revision_seconds_today, daily_revision_minutes_limit, max_topics_per_day, last_revision_date, student_education_level, student_major, student_focus_topic, ai_language, missed_questions_json, ai_provider, ai_model_overrides_json, question_difficulty, revision_reminder_enabled, revision_reminder_time, lightning_review_enabled
        FROM user_preferences WHERE user_id = ?`,
     [userId]
   );
@@ -496,8 +496,10 @@ const getStorageBundle = async (userId) => {
     edges: edges.map((row) => ({ id: row.id, source: row.source, target: row.target })),
     fsrsData,
     completedRevisionsToday: pref?.completed_revisions_today ?? 0,
+    completedTopicsToday: pref?.completed_topics_today ?? 0,
     revisionSecondsToday: pref?.revision_seconds_today ?? 0,
     dailyRevisionMinutesLimit: pref?.daily_revision_minutes_limit ?? 60,
+    maxTopicsPerDay: pref?.max_topics_per_day ?? 5,
     lastRevisionDate: pref?.last_revision_date ?? new Date().toISOString().slice(0, 10),
     studentEducationLevel: pref?.student_education_level || 'high school',
     studentMajor: pref?.student_major || '',
@@ -517,6 +519,7 @@ const getStorageBundle = async (userId) => {
     questionDifficulty: pref?.question_difficulty || 'doesnt_matter',
     revisionReminderEnabled: Boolean(pref?.revision_reminder_enabled),
     revisionReminderTime: pref?.revision_reminder_time || '09:00',
+    lightningReviewEnabled: Boolean(pref?.lightning_review_enabled ?? 1),
   };
 };
 
@@ -1758,10 +1761,13 @@ app.patch('/api/app/storage', async (req, res) => {
       typeof payload.aiModelOverrides !== 'undefined' ||
       typeof payload.questionDifficulty === 'string' ||
       typeof payload.revisionReminderEnabled === 'boolean' ||
-      typeof payload.revisionReminderTime === 'string'
+      typeof payload.revisionReminderTime === 'string' ||
+      typeof payload.completedTopicsToday === 'number' ||
+      typeof payload.maxTopicsPerDay === 'number' ||
+      typeof payload.lightningReviewEnabled === 'boolean'
     ) {
       const currentPref = await db.get(
-        `SELECT completed_revisions_today, revision_seconds_today, daily_revision_minutes_limit, last_revision_date, student_education_level, student_major, student_focus_topic, ai_language, missed_questions_json, ai_provider, ai_model_overrides_json, question_difficulty, revision_reminder_enabled, revision_reminder_time
+        `SELECT completed_revisions_today, completed_topics_today, revision_seconds_today, daily_revision_minutes_limit, max_topics_per_day, last_revision_date, student_education_level, student_major, student_focus_topic, ai_language, missed_questions_json, ai_provider, ai_model_overrides_json, question_difficulty, revision_reminder_enabled, revision_reminder_time, lightning_review_enabled
            FROM user_preferences WHERE user_id = ?`,
         [userId]
       );
@@ -1773,8 +1779,10 @@ app.patch('/api/app/storage', async (req, res) => {
       await db.run(
         `UPDATE user_preferences
             SET completed_revisions_today = ?,
+                completed_topics_today = ?,
                 revision_seconds_today = ?,
                 daily_revision_minutes_limit = ?,
+                max_topics_per_day = ?,
                 last_revision_date = ?,
                 student_education_level = ?,
                 student_major = ?,
@@ -1786,18 +1794,25 @@ app.patch('/api/app/storage', async (req, res) => {
                 question_difficulty = ?,
                 revision_reminder_enabled = ?,
                 revision_reminder_time = ?,
+                lightning_review_enabled = ?,
                 updated_at = CURRENT_TIMESTAMP
           WHERE user_id = ?`,
         [
           typeof payload.completedRevisionsToday === 'number'
             ? payload.completedRevisionsToday
             : (currentPref?.completed_revisions_today ?? 0),
+          typeof payload.completedTopicsToday === 'number'
+            ? payload.completedTopicsToday
+            : (currentPref?.completed_topics_today ?? 0),
           typeof payload.revisionSecondsToday === 'number'
             ? Math.max(0, Math.round(payload.revisionSecondsToday))
             : (currentPref?.revision_seconds_today ?? 0),
           typeof payload.dailyRevisionMinutesLimit === 'number'
             ? Math.max(10, Math.min(300, Math.round(payload.dailyRevisionMinutesLimit)))
             : (currentPref?.daily_revision_minutes_limit ?? 60),
+          typeof payload.maxTopicsPerDay === 'number'
+            ? Math.max(1, Math.min(20, Math.round(payload.maxTopicsPerDay)))
+            : (currentPref?.max_topics_per_day ?? 5),
           typeof payload.lastRevisionDate === 'string'
             ? payload.lastRevisionDate
             : (currentPref?.last_revision_date ?? new Date().toISOString().slice(0, 10)),
@@ -1831,6 +1846,9 @@ app.patch('/api/app/storage', async (req, res) => {
           typeof payload.revisionReminderTime === 'string' && /^\d{2}:\d{2}$/.test(payload.revisionReminderTime)
             ? payload.revisionReminderTime
             : (currentPref?.revision_reminder_time || '09:00'),
+          typeof payload.lightningReviewEnabled === 'boolean'
+            ? (payload.lightningReviewEnabled ? 1 : 0)
+            : (currentPref?.lightning_review_enabled ?? 1),
           userId,
         ]
       );

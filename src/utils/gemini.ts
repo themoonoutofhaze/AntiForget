@@ -86,6 +86,8 @@ export interface TutorTopicContext {
     questionDifficulty?: 'easy' | 'medium' | 'hard' | 'doesnt_matter' | 'auto';
     topicReps?: number;
     topicFsrsDifficulty?: number;
+    questionCount?: number;
+    isLightning?: boolean;
 }
 
 export interface AiAttempt {
@@ -116,8 +118,8 @@ export type TutorRequestMode = 'questions' | 'grading' | 'chat';
 
 const generationSystemPrompt = [
     'You are a Socratic Tutor for revision topics. First assistant turn for a topic:',
-    '- Generate exactly 3 open-ended questions in one message.',
-    '- Number and label them in this exact order: Q1 (CONCEPTUAL), Q2 (APPLIED), Q3 (CONNECTION).',
+    '- Generate open-ended questions in one message.',
+    '- Number and label them: Q1 (CONCEPTUAL), Q2 (APPLIED), Q3 (CONNECTION).',
     '- Ensure each question asks exactly one specific thing.',
     '- Output format must be exactly: Q[n] ([LABEL]): <question>',
     '- Do not include any intro or outro text. Output only questions.',
@@ -186,9 +188,26 @@ const buildTutorPrompt = (
             ? topicContext.missedQuestionHistory.filter((item) => typeof item === 'string' && item.trim()).slice(0, 5)
             : [];
 
-        const connectionQuestionInstruction = linkedTopics.length > 0
-            ? `3. CONNECTION - Must explore the relationship between "${topicName}" and "${linkedTopics[0]}"${linkedTopics.length > 1 ? ` (or other linked topics: ${linkedTopics.slice(1).join(', ')})` : ''}.`
-            : '3. CONNECTION - Explore how this topic relates to other relevant topics of your choosing.';
+        const questionCount = topicContext?.questionCount ?? 3;
+        const isLightning = topicContext?.isLightning ?? false;
+
+        const questionInstructions: string[] = [];
+        if (questionCount >= 1) {
+            questionInstructions.push('1. CONCEPTUAL - Test understanding of core concepts.');
+        }
+        if (questionCount >= 2) {
+            questionInstructions.push('2. APPLIED - Apply knowledge to a practical scenario.');
+        }
+        if (questionCount >= 3) {
+            const connectionInstruction = linkedTopics.length > 0
+                ? `3. CONNECTION - Must explore the relationship between "${topicName}" and "${linkedTopics[0]}"${linkedTopics.length > 1 ? ` (or other linked topics: ${linkedTopics.slice(1).join(', ')})` : ''}.`
+                : '3. CONNECTION - Explore how this topic relates to other relevant topics of your choosing.';
+            questionInstructions.push(connectionInstruction);
+        }
+
+        const questionCountInstruction = isLightning
+            ? 'Generate exactly 1 question (CONCEPTUAL only) for a quick check.'
+            : `Generate exactly ${questionCount} question${questionCount > 1 ? 's' : ''} of these types, in this order:`;
 
         finalPrompt = [
             `Topic: ${topicName}`,
@@ -201,10 +220,8 @@ const buildTutorPrompt = (
                 ? `Previously wrong questions to revisit:\n${weakHistory.map((q, i) => `${i + 1}. ${q}`).join('\n')}`
                 : 'Previously wrong questions to revisit: none',
             '',
-            'Generate exactly 3 questions of these types, in this order:',
-            '1. CONCEPTUAL',
-            '2. APPLIED',
-            connectionQuestionInstruction,
+            questionCountInstruction,
+            ...questionInstructions.slice(0, questionCount),
             '',
             `User: ${newPrompt}`,
         ].join('\n');
