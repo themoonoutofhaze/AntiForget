@@ -921,11 +921,8 @@ const extractProviderText = (provider, parsed) => {
 
 const generationSystemPrompt = `
 You are a Socratic Tutor for revision topics. First assistant turn for a topic:
-- Generate exactly 3 open-ended questions in one message.
-- Number and label them in this exact order: Q1 (CONCEPTUAL), Q2 (APPLIED), Q3 (CONNECTION).
-- Q1 (CONCEPTUAL): A theoretical conceptual question probing deep understanding ("why" or "what happens when").
-- Q2 (APPLIED): A practical scenario-based problem requiring reasoning.
-- Q3 (CONNECTION): Ask about the relationship with linked topics and how the idea is used.
+- Generate the exact number of open-ended questions requested in the user prompt.
+- Number and label questions in the exact order requested in the user prompt.
 - Ensure each question asks exactly ONE specific thing. Do NOT include multiple sub-questions or compound questions within a single question.
 - CRITICAL FORMAT OUT: You MUST output each question STRICTLY using this exact machine-readable format:
 Q[n] ([LABEL]): <Your Question Here>
@@ -976,18 +973,27 @@ const normalizeGeminiModelName = (model) => {
   return raw.toLowerCase();
 };
 
-const GEMMA_QUESTION_FORMAT_PROMPT = [
-  'Gemma-specific output requirements:',
-  '- Return exactly 3 lines in this exact format and order:',
-  'Q1 (CONCEPTUAL): <question>',
-  'Q2 (APPLIED): <question>',
-  'Q3 (CONNECTION): <question>',
-  '- Each line must contain exactly one question and end with a question mark.',
-  '- Do not include markdown, bullets, JSON, code fences, prefaces, or outro text.',
-  '- Do not output any thinking or control tags (for example: <|think|>, <|channel>thought, <channel|>).',
-].join('\n');
+const getGemmaQuestionFormatPrompt = (expectedQuestionCount = 3) => {
+  const safeCount = Math.max(1, Math.min(3, Number(expectedQuestionCount) || 3));
+  const formatLines = ['Q1 (CONCEPTUAL): <question>'];
+  if (safeCount >= 2) {
+    formatLines.push('Q2 (APPLIED): <question>');
+  }
+  if (safeCount >= 3) {
+    formatLines.push('Q3 (CONNECTION): <question>');
+  }
 
-const applyGemmaQuestionHandling = (messages = []) => {
+  return [
+    'Gemma-specific output requirements:',
+    `- Return exactly ${safeCount} line${safeCount > 1 ? 's' : ''} in this exact format and order:`,
+    ...formatLines,
+    '- Each line must contain exactly one question and end with a question mark.',
+    '- Do not include markdown, bullets, JSON, code fences, prefaces, or outro text.',
+    '- Do not output any thinking or control tags (for example: <|think|>, <|channel>thought, <channel|>).',
+  ].join('\n');
+};
+
+const applyGemmaQuestionHandling = (messages = [], expectedQuestionCount = 3) => {
   if (!Array.isArray(messages) || messages.length === 0) {
     return messages;
   }
@@ -996,7 +1002,7 @@ const applyGemmaQuestionHandling = (messages = []) => {
     if (index === 0 && message?.role === 'system' && typeof message?.content === 'string') {
       return {
         ...message,
-        content: `${message.content}\n${GEMMA_QUESTION_FORMAT_PROMPT}`,
+        content: `${message.content}\n${getGemmaQuestionFormatPrompt(expectedQuestionCount)}`,
       };
     }
     return message;
@@ -1020,7 +1026,8 @@ const normalizeGemmaOutputText = (text) => {
     .trim();
 };
 
-const formatParsedQuestionsForClient = (questions = []) => {
+const formatParsedQuestionsForClient = (questions = [], expectedQuestionCount = 3) => {
+  const safeCount = Math.max(1, Math.min(3, Number(expectedQuestionCount) || 3));
   const byIndex = new Map();
   for (const q of questions) {
     if (!q || typeof q.index !== 'number' || typeof q.content !== 'string') {
@@ -1038,7 +1045,7 @@ const formatParsedQuestionsForClient = (questions = []) => {
   };
 
   const lines = [];
-  for (const index of [1, 2, 3]) {
+  for (const index of [1, 2, 3].slice(0, safeCount)) {
     const content = byIndex.get(index);
     if (!content) {
       return '';
@@ -2661,6 +2668,8 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
     const userPref = await db.get(`SELECT ai_language FROM user_preferences WHERE user_id = ?`, [userId]);
     const resolvedLanguage = normalizeAiLanguage(aiLanguage || userPref?.ai_language || 'English');
     const shouldInjectTopicContext = resolvedMode === 'questions' && isFirstTurn;
+    let expectedQuestionCount = 3;
+    let isLightningSession = false;
     let tutorAttachment = null;
     let attachmentPromptContext = 'Attached file context: none';
     let finalPrompt = newPrompt;
@@ -2683,6 +2692,19 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
       const weakHistory = Array.isArray(topicContext?.missedQuestionHistory)
         ? topicContext.missedQuestionHistory.filter((item) => typeof item === 'string' && item.trim()).slice(0, 5)
         : [];
+      expectedQuestionCount = Math.max(1, Math.min(3, Number(topicContext?.questionCount) || 3));
+      isLightningSession = Boolean(topicContext?.isLightning);
+
+      const questionInstructions = ['1. CONCEPTUAL'];
+      if (expectedQuestionCount >= 2) {
+        questionInstructions.push('2. APPLIED');
+      }
+      if (expectedQuestionCount >= 3) {
+        questionInstructions.push('3. CONNECTION');
+      }
+      const questionCountInstruction = isLightningSession
+        ? 'Generate exactly 1 question (CONCEPTUAL only) for a quick check.'
+        : `Generate exactly ${expectedQuestionCount} question${expectedQuestionCount > 1 ? 's' : ''} of these types, in this order:`;
 
       try {
         tutorAttachment = await getTopicAttachmentForTutor({
@@ -2722,10 +2744,8 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
           ? `Previously wrong questions to revisit:\n${weakHistory.map((q, i) => `${i + 1}. ${q}`).join('\n')}`
           : 'Previously wrong questions to revisit: none',
         '',
-        'Generate exactly 3 questions of these types, in this order:',
-        '1. CONCEPTUAL',
-        '2. APPLIED',
-        '3. CONNECTION',
+        questionCountInstruction,
+        ...questionInstructions,
         '',
         `User: ${newPrompt}`,
       ].join('\n');
@@ -2813,7 +2833,7 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
         : messages;
 
       if (isGemmaModel && resolvedMode === 'questions') {
-        candidateMessages = applyGemmaQuestionHandling(candidateMessages);
+        candidateMessages = applyGemmaQuestionHandling(candidateMessages, expectedQuestionCount);
       }
 
       const candidateTemperature = isGemmaModel
@@ -2876,19 +2896,19 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
           const parsedQuestions = parseStructuredQuestions(normalizedText);
           if (parsedQuestions.length === 0) {
             currentAttempt.status = 422;
-            currentAttempt.error = 'Response received but failed to parse into the 3 required question categories.';
+            currentAttempt.error = `Response received but failed to parse into ${expectedQuestionCount} required question category${expectedQuestionCount > 1 ? 'ies' : 'y'}.`;
             currentAttempt.providerRawError = toDebugRawProviderMessage(raw);
             console.log(`[Model Selection] ❌ Failed ${candidate.id}: No parseable questions found`);
             continue;
           }
-          if (parsedQuestions.length < 3) {
+          if (parsedQuestions.length < expectedQuestionCount) {
             isValid = false;
-            console.log(`[Model Selection] ⚠️  ${candidate.id}: Only ${parsedQuestions.length}/3 questions parsed, marking invalid`);
-          } else if (isGemmaModel) {
-            const canonical = formatParsedQuestionsForClient(parsedQuestions);
+            console.log(`[Model Selection] ⚠️  ${candidate.id}: Only ${parsedQuestions.length}/${expectedQuestionCount} questions parsed, marking invalid`);
+          } else {
+            const canonical = formatParsedQuestionsForClient(parsedQuestions, expectedQuestionCount);
             if (!canonical) {
               isValid = false;
-              console.log(`[Model Selection] ⚠️  ${candidate.id}: Gemma normalization failed to produce canonical 3-question format`);
+              console.log(`[Model Selection] ⚠️  ${candidate.id}: Failed to produce canonical ${expectedQuestionCount}-question format`);
             } else {
               clientText = canonical;
             }

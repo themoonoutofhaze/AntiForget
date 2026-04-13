@@ -179,6 +179,7 @@ export const SocraticArena: React.FC = () => {
     const [isStarting, setIsStarting] = useState(false);
     const [startingMode, setStartingMode] = useState<'review' | 'practice' | 'lightning' | null>(null);
     const [isExitingQuiz, setIsExitingQuiz] = useState(false);
+    const [isLightningEnabled, setIsLightningEnabled] = useState(true);
     const [isLightningMode, setIsLightningMode] = useState(false);
     const [maxTopicsPerDay, setMaxTopicsPerDay] = useState(5);
     const [completedTopicsToday, setCompletedTopicsToday] = useState(0);
@@ -232,7 +233,7 @@ export const SocraticArena: React.FC = () => {
                 const completedToday = storage.completedTopicsToday || 0;
                 setCompletedTopicsToday(completedToday);
                 setTopicLimitReached(dueCount > 0 && completedToday >= maxTopics);
-                setIsLightningMode(storage.lightningReviewEnabled ?? true);
+                setIsLightningEnabled(storage.lightningReviewEnabled ?? true);
             } catch (error) {
                 console.error('Failed to load Socratic lobby state:', error);
             } finally {
@@ -426,7 +427,10 @@ export const SocraticArena: React.FC = () => {
             }
             setQuestionGenerationMs(typeof resp.generationMs === 'number' ? resp.generationMs : null);
             await new Promise((resolve) => window.setTimeout(resolve, 450));
-            const parsed = parseQuestions(resp.text);
+            const expectedQuestionCount = Math.max(1, Math.min(3, topicContext.questionCount || (lightning ? 1 : 3)));
+            const parsed = parseQuestions(resp.text)
+                .sort((a, b) => a.index - b.index)
+                .slice(0, expectedQuestionCount);
             setRawAiQuestionMessage(resp.text);
             setQuestions(parsed);
             setAnswers(new Array(parsed.length).fill(''));
@@ -789,7 +793,7 @@ export const SocraticArena: React.FC = () => {
                                             <><Target className="w-4 h-4" /> Start Review ({sessionMinutesLimit} min)</>
                                         )}
                                     </button>
-                                    {isLightningMode && (
+                                    {isLightningEnabled && (
                                         <button id="start-lightning-btn" onClick={() => startQuiz(false, undefined, true)}
                                             className="btn-secondary gap-2 flex-1"
                                             disabled={isStarting}

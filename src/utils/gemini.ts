@@ -119,7 +119,7 @@ export type TutorRequestMode = 'questions' | 'grading' | 'chat';
 const generationSystemPrompt = [
     'You are a Socratic Tutor for revision topics. First assistant turn for a topic:',
     '- Generate open-ended questions in one message.',
-    '- Number and label them: Q1 (CONCEPTUAL), Q2 (APPLIED), Q3 (CONNECTION).',
+    '- Number and label questions exactly as instructed in the user prompt.',
     '- Ensure each question asks exactly one specific thing.',
     '- Output format must be exactly: Q[n] ([LABEL]): <question>',
     '- Do not include any intro or outro text. Output only questions.',
@@ -190,6 +190,7 @@ const buildTutorPrompt = (
 
         const questionCount = topicContext?.questionCount ?? 3;
         const isLightning = topicContext?.isLightning ?? false;
+        const expectedQuestionCount = Math.max(1, Math.min(3, questionCount));
 
         const questionInstructions: string[] = [];
         if (questionCount >= 1) {
@@ -207,7 +208,7 @@ const buildTutorPrompt = (
 
         const questionCountInstruction = isLightning
             ? 'Generate exactly 1 question (CONCEPTUAL only) for a quick check.'
-            : `Generate exactly ${questionCount} question${questionCount > 1 ? 's' : ''} of these types, in this order:`;
+            : `Generate exactly ${expectedQuestionCount} question${expectedQuestionCount > 1 ? 's' : ''} of these types, in this order:`;
 
         finalPrompt = [
             `Topic: ${topicName}`,
@@ -221,7 +222,7 @@ const buildTutorPrompt = (
                 : 'Previously wrong questions to revisit: none',
             '',
             questionCountInstruction,
-            ...questionInstructions.slice(0, questionCount),
+            ...questionInstructions.slice(0, expectedQuestionCount),
             '',
             `User: ${newPrompt}`,
         ].join('\n');
