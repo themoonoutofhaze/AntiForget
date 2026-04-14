@@ -36,6 +36,50 @@ const Q_LABEL_MAP: Record<number, string> = {
     3: 'CONNECTION',
 };
 
+const REVISION_LEARNED_SECTION_TITLE = 'Learned in Revision';
+const MAX_TOPIC_SUMMARY_LENGTH = 50000;
+
+const formatLearningBullet = (note: string) => {
+    const timestamp = new Date().toLocaleString();
+    return `- [${timestamp}] ${note.trim()}`;
+};
+
+const appendLearningToSummary = (existingSummary: string, note: string) => {
+    const normalizedNote = note.trim();
+    if (!normalizedNote) {
+        return existingSummary;
+    }
+
+    const summary = (existingSummary || '').trimEnd();
+    const heading = `## ${REVISION_LEARNED_SECTION_TITLE}`;
+    const headingRegex = /^##\s*Learned in Revision\s*$/im;
+    const bullet = formatLearningBullet(normalizedNote);
+    const headingMatch = headingRegex.exec(summary);
+
+    if (!headingMatch) {
+        if (!summary) {
+            return `${heading}\n${bullet}`;
+        }
+        return `${summary}\n\n${heading}\n${bullet}`;
+    }
+
+    const sectionStart = headingMatch.index;
+    const sectionContentStart = summary.indexOf('\n', sectionStart) === -1
+        ? summary.length
+        : summary.indexOf('\n', sectionStart) + 1;
+
+    const nextHeadingRegex = /^##\s+/gm;
+    nextHeadingRegex.lastIndex = sectionContentStart;
+    const nextHeadingMatch = nextHeadingRegex.exec(summary);
+    const sectionEnd = nextHeadingMatch ? nextHeadingMatch.index : summary.length;
+
+    const beforeSectionEnd = summary.slice(0, sectionEnd).trimEnd();
+    const afterSection = summary.slice(sectionEnd);
+    const separatorAfterBullet = afterSection.length > 0 && !afterSection.startsWith('\n') ? '\n' : '';
+
+    return `${beforeSectionEnd}\n${bullet}${separatorAfterBullet}${afterSection}`;
+};
+
 /** Parse the questions out of the AI's opening message. */
 const parseQuestions = (text: string): QuizQuestion[] => {
     const results: QuizQuestion[] = [];
@@ -145,6 +189,11 @@ export const SocraticArena: React.FC = () => {
     const [chatInput, setChatInput] = useState('');
     const [isChatSending, setIsChatSending] = useState(false);
     const [chatError, setChatError] = useState<string | null>(null);
+    const [manualLearningInput, setManualLearningInput] = useState('');
+    const [activeLearningMessageIndex, setActiveLearningMessageIndex] = useState<number | null>(null);
+    const [messageLearningInput, setMessageLearningInput] = useState('');
+    const [isSummaryAppendSaving, setIsSummaryAppendSaving] = useState(false);
+    const [summaryAppendNotice, setSummaryAppendNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
 
     /* Lobby swipe physics */
     const lobbyRef = useRef<HTMLDivElement>(null);
@@ -247,6 +296,12 @@ export const SocraticArena: React.FC = () => {
         return () => { activeRequestRef.current?.abort(); };
     }, []);
 
+    useEffect(() => {
+        if (!summaryAppendNotice) return;
+        const timer = window.setTimeout(() => setSummaryAppendNotice(null), 2600);
+        return () => window.clearTimeout(timer);
+    }, [summaryAppendNotice]);
+
     const getElapsedSeconds = () => {
         if (!sessionStartedAt) return 0;
         return Math.max(0, Math.round((Date.now() - sessionStartedAt) / 1000));
@@ -312,6 +367,56 @@ export const SocraticArena: React.FC = () => {
         } finally {
             if (activeRequestRef.current === controller) activeRequestRef.current = null;
             setIsChatSending(false);
+        }
+    };
+
+    const appendLearningToCurrentTopic = async (learningText: string) => {
+        const trimmed = learningText.trim();
+        if (!trimmed || !currentNodeId || isSummaryAppendSaving) {
+            return false;
+        }
+
+        setSummaryAppendNotice(null);
+        setIsSummaryAppendSaving(true);
+        try {
+            const storage = await getStorage();
+            const topic = storage.nodes.find((node) => node.id === currentNodeId);
+            if (!topic) {
+                setSummaryAppendNotice({ kind: 'error', message: 'Could not find the active topic.' });
+                return false;
+            }
+
+            const appendedSummary = appendLearningToSummary(topic.summary || '', trimmed).slice(0, MAX_TOPIC_SUMMARY_LENGTH);
+            const updatedNodes = storage.nodes.map((node) =>
+                node.id === currentNodeId
+                    ? { ...node, summary: appendedSummary }
+                    : node
+            );
+
+            await updateStorage({ nodes: updatedNodes });
+            setSummaryAppendNotice({ kind: 'success', message: 'Learning added to topic summary.' });
+            return true;
+        } catch (error) {
+            console.error('Failed to append learning to summary:', error);
+            setSummaryAppendNotice({ kind: 'error', message: 'Failed to save learning. Try again.' });
+            return false;
+        } finally {
+            setIsSummaryAppendSaving(false);
+        }
+    };
+
+    const handleSaveManualLearning = async () => {
+        const ok = await appendLearningToCurrentTopic(manualLearningInput);
+        if (ok) {
+            setManualLearningInput('');
+        }
+    };
+
+    const handleSaveMessageLearning = async () => {
+        const ok = await appendLearningToCurrentTopic(messageLearningInput);
+        if (ok) {
+            setMessageLearningInput('');
+            setActiveLearningMessageIndex(null);
         }
     };
 
@@ -408,6 +513,11 @@ export const SocraticArena: React.FC = () => {
         setChatInput('');
         setIsChatSending(false);
         setChatError(null);
+        setManualLearningInput('');
+        setActiveLearningMessageIndex(null);
+        setMessageLearningInput('');
+        setIsSummaryAppendSaving(false);
+        setSummaryAppendNotice(null);
         activeRequestRef.current?.abort();
 
         const topicContext = await buildTopicContext(nextId, lightning);
@@ -459,6 +569,11 @@ export const SocraticArena: React.FC = () => {
         setChatInput('');
         setIsChatSending(false);
         setChatError(null);
+        setManualLearningInput('');
+        setActiveLearningMessageIndex(null);
+        setMessageLearningInput('');
+        setIsSummaryAppendSaving(false);
+        setSummaryAppendNotice(null);
 
         // Build a single combined answer message for the AI
         const combinedAnswer = questions
@@ -538,6 +653,11 @@ export const SocraticArena: React.FC = () => {
         setChatInput('');
         setIsChatSending(false);
         setChatError(null);
+        setManualLearningInput('');
+        setActiveLearningMessageIndex(null);
+        setMessageLearningInput('');
+        setIsSummaryAppendSaving(false);
+        setSummaryAppendNotice(null);
 
         const elapsed = getElapsedSeconds();
         setSessionStartedAt(null);
@@ -586,6 +706,11 @@ export const SocraticArena: React.FC = () => {
         setChatInput('');
         setIsChatSending(false);
         setChatError(null);
+        setManualLearningInput('');
+        setActiveLearningMessageIndex(null);
+        setMessageLearningInput('');
+        setIsSummaryAppendSaving(false);
+        setSummaryAppendNotice(null);
         setIsStarting(false);
         setStartingMode(null);
         setIsExitingQuiz(false);
@@ -1142,6 +1267,58 @@ export const SocraticArena: React.FC = () => {
                                         ) : (
                                             <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>{message.text}</p>
                                         )}
+
+                                        {message.role === 'model' && (
+                                            <div className="mt-3 space-y-2">
+                                                <button
+                                                    id={`append-from-ai-msg-btn-${idx}`}
+                                                    onClick={() => {
+                                                        setSummaryAppendNotice(null);
+                                                        setActiveLearningMessageIndex((prev) => (prev === idx ? null : idx));
+                                                        setMessageLearningInput('');
+                                                    }}
+                                                    className="btn-secondary text-xs"
+                                                    disabled={isSummaryAppendSaving}
+                                                >
+                                                    Add to Summary
+                                                </button>
+
+                                                {activeLearningMessageIndex === idx && (
+                                                    <div className="space-y-2">
+                                                        <textarea
+                                                            id={`append-from-ai-msg-input-${idx}`}
+                                                            value={messageLearningInput}
+                                                            onChange={(e) => setMessageLearningInput(e.target.value)}
+                                                            className="textarea-field"
+                                                            rows={3}
+                                                            placeholder="What did you learn from this answer?"
+                                                            disabled={isSummaryAppendSaving}
+                                                        />
+                                                        <div className="flex flex-wrap gap-2">
+                                                            <button
+                                                                id={`save-ai-msg-learning-btn-${idx}`}
+                                                                onClick={handleSaveMessageLearning}
+                                                                disabled={!messageLearningInput.trim() || isSummaryAppendSaving}
+                                                                className="btn-primary text-xs"
+                                                            >
+                                                                {isSummaryAppendSaving ? 'Saving…' : 'Save to Summary'}
+                                                            </button>
+                                                            <button
+                                                                id={`cancel-ai-msg-learning-btn-${idx}`}
+                                                                onClick={() => {
+                                                                    setActiveLearningMessageIndex(null);
+                                                                    setMessageLearningInput('');
+                                                                }}
+                                                                className="btn-secondary text-xs"
+                                                                disabled={isSummaryAppendSaving}
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 ))}
                                 {isChatSending && (
@@ -1154,6 +1331,40 @@ export const SocraticArena: React.FC = () => {
                             {chatError && (
                                 <p className="text-xs" style={{ color: '#ef4444' }}>{chatError}</p>
                             )}
+
+                            {summaryAppendNotice && (
+                                <p
+                                    className="text-xs"
+                                    style={{ color: summaryAppendNotice.kind === 'success' ? '#10b981' : '#ef4444' }}
+                                >
+                                    {summaryAppendNotice.message}
+                                </p>
+                            )}
+
+                            <div className="rounded-xl p-3 space-y-2" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.22)' }}>
+                                <p className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                                    Add Learning to Summary
+                                </p>
+                                <textarea
+                                    id="manual-summary-learning-input"
+                                    value={manualLearningInput}
+                                    onChange={(e) => setManualLearningInput(e.target.value)}
+                                    className="textarea-field"
+                                    rows={3}
+                                    placeholder="Write one thing you learned in this chat..."
+                                    disabled={isSummaryAppendSaving}
+                                />
+                                <div className="flex justify-end">
+                                    <button
+                                        id="save-manual-summary-learning-btn"
+                                        onClick={handleSaveManualLearning}
+                                        disabled={!manualLearningInput.trim() || isSummaryAppendSaving}
+                                        className="btn-primary text-xs"
+                                    >
+                                        {isSummaryAppendSaving ? 'Saving…' : 'Add to Summary'}
+                                    </button>
+                                </div>
+                            </div>
 
                             <div className="flex flex-col sm:flex-row gap-2">
                                 <input
