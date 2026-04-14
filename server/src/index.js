@@ -464,8 +464,10 @@ const getStorageBundle = async (userId) => {
   );
 
   const fsrsRows = await db.all(
-    `SELECT node_id, due, stability, difficulty, elapsed_days, scheduled_days, reps, lapses, state
-       FROM fsrs_records WHERE user_id = ?`,
+    `SELECT f.node_id, f.due, f.stability, f.difficulty, f.elapsed_days, f.scheduled_days, f.reps, f.lapses, f.state
+       FROM fsrs_records f
+       INNER JOIN topics t ON t.user_id = f.user_id AND t.id = f.node_id
+       WHERE f.user_id = ?`,
     [userId]
   );
 
@@ -2674,9 +2676,19 @@ app.post('/api/app/ai/tutor', tutorRateLimiter, async (req, res) => {
     let attachmentPromptContext = 'Attached file context: none';
     let finalPrompt = newPrompt;
     if (shouldInjectTopicContext) {
-      const topicName = typeof topicContext?.topicName === 'string' && topicContext.topicName.trim()
-        ? topicContext.topicName.trim()
-        : 'Unknown topic';
+      const topicId = typeof topicContext?.topicId === 'string' ? topicContext.topicId.trim() : '';
+      let canonicalTopicName = '';
+      if (topicId) {
+        const topicRow = await db.get(
+          `SELECT title FROM topics WHERE user_id = ? AND id = ?`,
+          [userId, topicId]
+        );
+        canonicalTopicName = typeof topicRow?.title === 'string' ? topicRow.title.trim() : '';
+      }
+      const topicName = canonicalTopicName
+        || (typeof topicContext?.topicName === 'string' && topicContext.topicName.trim()
+          ? topicContext.topicName.trim()
+          : 'Unknown topic');
       const linkedTopics = Array.isArray(topicContext?.linkedTopicNames)
         ? topicContext.linkedTopicNames.filter((name) => typeof name === 'string' && name.trim())
         : [];

@@ -151,6 +151,7 @@ export const addRevisionSeconds = async (sessionSecondsSpent: number) => {
 export const getTodaysReviews = async () => {
     const storage = await getStorage();
     const now = Date.now();
+    const validNodeIds = new Set(storage.nodes.map((node) => node.id));
 
     // Check daily limit reset
     const todayStr = new Date().toISOString().split('T')[0];
@@ -180,7 +181,7 @@ export const getTodaysReviews = async () => {
 
     // Find all due items
     const dueItems = Object.entries(storage.fsrsData)
-        .filter(([, data]) => data.due <= now)
+        .filter(([nodeId, data]) => validNodeIds.has(nodeId) && data.due <= now)
         .map(([nodeId]) => nodeId);
 
     // Shuffle due items for variety.

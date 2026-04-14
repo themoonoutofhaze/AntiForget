@@ -96,6 +96,10 @@ const parseQuestions = (text: string): QuizQuestion[] => {
     return results;
 };
 
+const resolveValidDueQueue = (dueQueue: string[], validNodeIds: Set<string>): string[] => {
+    return dueQueue.filter((id) => validNodeIds.has(id));
+};
+
 /** Parse per-question scores + correct answers from the grading response. */
 const parseResults = (text: string, userAnswers: string[], questions: QuizQuestion[]): QuizResult[] => {
     const results: QuizResult[] = [];
@@ -189,10 +193,10 @@ export const SocraticArena: React.FC = () => {
     const [chatInput, setChatInput] = useState('');
     const [isChatSending, setIsChatSending] = useState(false);
     const [chatError, setChatError] = useState<string | null>(null);
-    const [manualLearningInput, setManualLearningInput] = useState('');
-    const [activeLearningMessageIndex, setActiveLearningMessageIndex] = useState<number | null>(null);
-    const [messageLearningInput, setMessageLearningInput] = useState('');
+    const [isSummaryComposerOpen, setIsSummaryComposerOpen] = useState(false);
+    const [summaryDraftInput, setSummaryDraftInput] = useState('');
     const [isSummaryAppendSaving, setIsSummaryAppendSaving] = useState(false);
+    const [isSummaryDraftGenerating, setIsSummaryDraftGenerating] = useState(false);
     const [summaryAppendNotice, setSummaryAppendNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
 
     /* Lobby swipe physics */
@@ -272,7 +276,10 @@ export const SocraticArena: React.FC = () => {
                 setDueNodes(reviews);
 
                 const now = Date.now();
-                const dueCount = Object.values(storage.fsrsData).filter((data) => data.due <= now).length;
+                const validNodeIds = new Set(storage.nodes.map((node) => node.id));
+                const dueCount = Object.entries(storage.fsrsData)
+                    .filter(([nodeId, data]) => validNodeIds.has(nodeId) && data.due <= now)
+                    .length;
                 const dailyLimitMinutes = Math.max(10, storage.dailyRevisionMinutesLimit || 60);
                 setSessionMinutesLimit(dailyLimitMinutes);
                 setTimeBudgetReached(dueCount > 0 && storage.revisionSecondsToday >= dailyLimitMinutes * 60);
@@ -325,6 +332,15 @@ export const SocraticArena: React.FC = () => {
         ].filter(Boolean).join('\n\n');
     };
 
+    const buildChatTranscript = () => {
+        if (chatMessages.length === 0) {
+            return '';
+        }
+        return chatMessages
+            .map((message) => `${message.role === 'user' ? 'Student' : 'AI Tutor'}: ${message.text}`)
+            .join('\n\n');
+    };
+
     const sendChatMessage = async () => {
         const trimmed = chatInput.trim();
         if (!trimmed || isChatSending) return;
@@ -351,7 +367,8 @@ export const SocraticArena: React.FC = () => {
         activeRequestRef.current = controller;
 
         try {
-            const topicContext = currentNodeId ? await buildTopicContext(currentNodeId) : null;
+            const storage = await getStorage();
+            const topicContext = currentNodeId ? buildTopicContext(storage, currentNodeId, isLightningMode) : null;
             const resp = await generateTutorResponse(history, prompt, topicContext, {
                 signal: controller.signal,
                 mode: 'chat',
@@ -405,24 +422,78 @@ export const SocraticArena: React.FC = () => {
         }
     };
 
-    const handleSaveManualLearning = async () => {
-        const ok = await appendLearningToCurrentTopic(manualLearningInput);
+    const handleSaveSummaryDraft = async () => {
+        const ok = await appendLearningToCurrentTopic(summaryDraftInput);
         if (ok) {
-            setManualLearningInput('');
+            setSummaryDraftInput('');
+            setIsSummaryComposerOpen(false);
         }
     };
 
-    const handleSaveMessageLearning = async () => {
-        const ok = await appendLearningToCurrentTopic(messageLearningInput);
-        if (ok) {
-            setMessageLearningInput('');
-            setActiveLearningMessageIndex(null);
+    const handleGenerateSummaryDraftFromChat = async () => {
+        if (isSummaryDraftGenerating || isChatSending) {
+            return;
+        }
+
+        if (chatMessages.length === 0) {
+            setSummaryAppendNotice({ kind: 'error', message: 'Start the chat first to generate a summary draft.' });
+            return;
+        }
+
+        setSummaryAppendNotice(null);
+        setIsSummaryComposerOpen(true);
+        setIsSummaryDraftGenerating(true);
+
+        const controller = new AbortController();
+        activeRequestRef.current?.abort();
+        activeRequestRef.current = controller;
+
+        try {
+            const chatTranscript = buildChatTranscript();
+            const prompt = [
+                `${buildRevisionChatContext()}`,
+                'Follow-up dialogue transcript:',
+                chatTranscript,
+                '',
+                'Task:',
+                '- Write a concise summary of ONLY new learnings from this follow-up dialogue.',
+                '- Exclude points already covered in the original quiz recap.',
+                '- Use short bullet points.',
+                '- Keep it actionable and topic-specific.',
+            ].join('\n');
+
+            const storage = await getStorage();
+            const topicContext = currentNodeId ? buildTopicContext(storage, currentNodeId, isLightningMode) : null;
+            const resp = await generateTutorResponse([], prompt, topicContext, {
+                signal: controller.signal,
+                mode: 'chat',
+            });
+
+            if (resp.provider && resp.model) {
+                setActiveModelInfo({ provider: resp.provider, model: resp.model });
+            }
+
+            setSummaryDraftInput(resp.text.trim());
+            setSummaryAppendNotice({ kind: 'success', message: 'Summary draft generated. You can edit it before saving.' });
+        } catch (error: any) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                return;
+            }
+            console.error('Failed to generate summary draft from chat:', error);
+            setSummaryAppendNotice({ kind: 'error', message: error?.message || 'Failed to generate summary draft. Please try again.' });
+        } finally {
+            if (activeRequestRef.current === controller) {
+                activeRequestRef.current = null;
+            }
+            setIsSummaryDraftGenerating(false);
         }
     };
 
-    const buildTopicContext = async (topicId: string, isLightning: boolean = false): Promise<TutorTopicContext> => {
-        const storage = await getStorage();
+    const buildTopicContext = (storage: Awaited<ReturnType<typeof getStorage>>, topicId: string, isLightning: boolean = false): TutorTopicContext | null => {
         const node = storage.nodes.find((n) => n.id === topicId);
+        if (!node) {
+            return null;
+        }
         const linkedTopicIdSet = new Set<string>();
         for (const edge of storage.edges) {
             if (edge.source === topicId && edge.target !== topicId) linkedTopicIdSet.add(edge.target);
@@ -437,10 +508,10 @@ export const SocraticArena: React.FC = () => {
 
         return {
             topicId,
-            topicName: node?.title || 'Unknown topic',
+            topicName: node.title,
             linkedTopicNames,
-            summaryContent: node?.summary || 'No summary available.',
-            hasAttachedFile: Boolean(node?.hasPdfBlob),
+            summaryContent: node.summary || 'No summary available.',
+            hasAttachedFile: Boolean(node.hasPdfBlob),
             studentLevel: (storage.studentEducationLevel || 'high school').trim() || 'high school',
             studentMajor: (storage.studentMajor || '').trim(),
             aiLanguage: (storage.aiLanguage || 'English').trim() || 'English',
@@ -485,16 +556,30 @@ export const SocraticArena: React.FC = () => {
         setIsStarting(true);
         setStartingMode(lightning ? 'lightning' : unrecorded ? 'practice' : 'review');
         let nextId: string | null = null;
+        const storage = await getStorage();
+        const validNodeIds = new Set(storage.nodes.map((node) => node.id));
         if (unrecorded) {
-            const storage = await getStorage();
             if (storage.nodes.length === 0) { setIsStarting(false); return; } // no topics to practice
             nextId = storage.nodes[Math.floor(Math.random() * storage.nodes.length)].id;
         } else {
             const dueQueue = dueNodeOverride || dueNodes;
-            if (dueQueue.length === 0) { setIsStarting(false); return; }
-            nextId = dueQueue[0];
+            const validDueQueue = resolveValidDueQueue(dueQueue, validNodeIds);
+            if (validDueQueue.length !== dueQueue.length) {
+                setDueNodes(validDueQueue);
+            }
+            if (validDueQueue.length === 0) { setIsStarting(false); return; }
+            nextId = validDueQueue[0];
         }
         if (!nextId) { setIsStarting(false); return; }
+
+        const topicContext = buildTopicContext(storage, nextId, lightning);
+        if (!topicContext) {
+            setCurrentNodeId(null);
+            setCurrentTopicName('');
+            setIsStarting(false);
+            setStartingMode(null);
+            return;
+        }
 
         setCurrentNodeId(nextId);
         setIsUnrecorded(unrecorded);
@@ -513,15 +598,13 @@ export const SocraticArena: React.FC = () => {
         setChatInput('');
         setIsChatSending(false);
         setChatError(null);
-        setManualLearningInput('');
-        setActiveLearningMessageIndex(null);
-        setMessageLearningInput('');
+        setIsSummaryComposerOpen(false);
+        setSummaryDraftInput('');
         setIsSummaryAppendSaving(false);
+        setIsSummaryDraftGenerating(false);
         setSummaryAppendNotice(null);
         activeRequestRef.current?.abort();
-
-        const topicContext = await buildTopicContext(nextId, lightning);
-        setCurrentTopicName(topicContext.topicName || 'Unknown topic');
+        setCurrentTopicName(topicContext.topicName);
         const controller = new AbortController();
         activeRequestRef.current = controller;
 
@@ -569,10 +652,10 @@ export const SocraticArena: React.FC = () => {
         setChatInput('');
         setIsChatSending(false);
         setChatError(null);
-        setManualLearningInput('');
-        setActiveLearningMessageIndex(null);
-        setMessageLearningInput('');
+        setIsSummaryComposerOpen(false);
+        setSummaryDraftInput('');
         setIsSummaryAppendSaving(false);
+        setIsSummaryDraftGenerating(false);
         setSummaryAppendNotice(null);
 
         // Build a single combined answer message for the AI
@@ -653,10 +736,10 @@ export const SocraticArena: React.FC = () => {
         setChatInput('');
         setIsChatSending(false);
         setChatError(null);
-        setManualLearningInput('');
-        setActiveLearningMessageIndex(null);
-        setMessageLearningInput('');
+        setIsSummaryComposerOpen(false);
+        setSummaryDraftInput('');
         setIsSummaryAppendSaving(false);
+        setIsSummaryDraftGenerating(false);
         setSummaryAppendNotice(null);
 
         const elapsed = getElapsedSeconds();
@@ -706,10 +789,10 @@ export const SocraticArena: React.FC = () => {
         setChatInput('');
         setIsChatSending(false);
         setChatError(null);
-        setManualLearningInput('');
-        setActiveLearningMessageIndex(null);
-        setMessageLearningInput('');
+        setIsSummaryComposerOpen(false);
+        setSummaryDraftInput('');
         setIsSummaryAppendSaving(false);
+        setIsSummaryDraftGenerating(false);
         setSummaryAppendNotice(null);
         setIsStarting(false);
         setStartingMode(null);
@@ -1267,58 +1350,6 @@ export const SocraticArena: React.FC = () => {
                                         ) : (
                                             <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>{message.text}</p>
                                         )}
-
-                                        {message.role === 'model' && (
-                                            <div className="mt-3 space-y-2">
-                                                <button
-                                                    id={`append-from-ai-msg-btn-${idx}`}
-                                                    onClick={() => {
-                                                        setSummaryAppendNotice(null);
-                                                        setActiveLearningMessageIndex((prev) => (prev === idx ? null : idx));
-                                                        setMessageLearningInput('');
-                                                    }}
-                                                    className="btn-secondary text-xs"
-                                                    disabled={isSummaryAppendSaving}
-                                                >
-                                                    Add to Summary
-                                                </button>
-
-                                                {activeLearningMessageIndex === idx && (
-                                                    <div className="space-y-2">
-                                                        <textarea
-                                                            id={`append-from-ai-msg-input-${idx}`}
-                                                            value={messageLearningInput}
-                                                            onChange={(e) => setMessageLearningInput(e.target.value)}
-                                                            className="textarea-field"
-                                                            rows={3}
-                                                            placeholder="What did you learn from this answer?"
-                                                            disabled={isSummaryAppendSaving}
-                                                        />
-                                                        <div className="flex flex-wrap gap-2">
-                                                            <button
-                                                                id={`save-ai-msg-learning-btn-${idx}`}
-                                                                onClick={handleSaveMessageLearning}
-                                                                disabled={!messageLearningInput.trim() || isSummaryAppendSaving}
-                                                                className="btn-primary text-xs"
-                                                            >
-                                                                {isSummaryAppendSaving ? 'Saving…' : 'Save to Summary'}
-                                                            </button>
-                                                            <button
-                                                                id={`cancel-ai-msg-learning-btn-${idx}`}
-                                                                onClick={() => {
-                                                                    setActiveLearningMessageIndex(null);
-                                                                    setMessageLearningInput('');
-                                                                }}
-                                                                className="btn-secondary text-xs"
-                                                                disabled={isSummaryAppendSaving}
-                                                            >
-                                                                Cancel
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
                                     </div>
                                 ))}
                                 {isChatSending && (
@@ -1340,31 +1371,6 @@ export const SocraticArena: React.FC = () => {
                                     {summaryAppendNotice.message}
                                 </p>
                             )}
-
-                            <div className="rounded-xl p-3 space-y-2" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.22)' }}>
-                                <p className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-                                    Add Learning to Summary
-                                </p>
-                                <textarea
-                                    id="manual-summary-learning-input"
-                                    value={manualLearningInput}
-                                    onChange={(e) => setManualLearningInput(e.target.value)}
-                                    className="textarea-field"
-                                    rows={3}
-                                    placeholder="Write one thing you learned in this chat..."
-                                    disabled={isSummaryAppendSaving}
-                                />
-                                <div className="flex justify-end">
-                                    <button
-                                        id="save-manual-summary-learning-btn"
-                                        onClick={handleSaveManualLearning}
-                                        disabled={!manualLearningInput.trim() || isSummaryAppendSaving}
-                                        className="btn-primary text-xs"
-                                    >
-                                        {isSummaryAppendSaving ? 'Saving…' : 'Add to Summary'}
-                                    </button>
-                                </div>
-                            </div>
 
                             <div className="flex flex-col sm:flex-row gap-2">
                                 <input
@@ -1390,6 +1396,58 @@ export const SocraticArena: React.FC = () => {
                                     <Send className="w-4 h-4" />
                                     Send
                                 </button>
+                            </div>
+
+                            <div className="pt-1 space-y-3" style={{ borderTop: '1px solid var(--border-default)' }}>
+                                <button
+                                    id="toggle-summary-composer-btn"
+                                    onClick={() => {
+                                        setSummaryAppendNotice(null);
+                                        setIsSummaryComposerOpen((prev) => !prev);
+                                    }}
+                                    className="btn-secondary text-sm"
+                                    disabled={isSummaryAppendSaving || isSummaryDraftGenerating}
+                                >
+                                    Add to Summary
+                                </button>
+
+                                <div
+                                    className="space-y-2 overflow-hidden"
+                                    style={{
+                                        maxHeight: isSummaryComposerOpen ? 360 : 0,
+                                        opacity: isSummaryComposerOpen ? 1 : 0,
+                                        transform: isSummaryComposerOpen ? 'translateY(0)' : 'translateY(-8px)',
+                                        transition: 'max-height 280ms ease, opacity 220ms ease, transform 220ms ease',
+                                    }}
+                                >
+                                    <textarea
+                                        id="summary-draft-input"
+                                        value={summaryDraftInput}
+                                        onChange={(e) => setSummaryDraftInput(e.target.value)}
+                                        className="textarea-field"
+                                        rows={4}
+                                        placeholder="Summarize what you newly learned in this chat..."
+                                        disabled={isSummaryAppendSaving || isSummaryDraftGenerating}
+                                    />
+                                    <div className="flex flex-col sm:flex-row gap-2">
+                                        <button
+                                            id="save-summary-draft-btn"
+                                            onClick={handleSaveSummaryDraft}
+                                            disabled={!summaryDraftInput.trim() || isSummaryAppendSaving || isSummaryDraftGenerating}
+                                            className="btn-primary text-xs"
+                                        >
+                                            {isSummaryAppendSaving ? 'Saving…' : "Add to Topic's Summary"}
+                                        </button>
+                                        <button
+                                            id="generate-summary-draft-btn"
+                                            onClick={handleGenerateSummaryDraftFromChat}
+                                            disabled={isSummaryDraftGenerating || isSummaryAppendSaving || isChatSending || chatMessages.length === 0}
+                                            className="btn-secondary text-xs"
+                                        >
+                                            {isSummaryDraftGenerating ? 'Generating…' : 'Generate Draft from Chat'}
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
