@@ -926,6 +926,8 @@ You are a Socratic Tutor for revision topics. First assistant turn for a topic:
 - Generate the exact number of open-ended questions requested in the user prompt.
 - Number and label questions in the exact order requested in the user prompt.
 - Ensure each question asks exactly ONE specific thing. Do NOT include multiple sub-questions or compound questions within a single question.
+- If a question references a scenario, case, or example, include enough scenario details in the question text itself so the student can answer without hidden context.
+- Never refer to "the scenario", "this scenario", "that case", or "the example above" unless the key details are explicitly restated in the question.
 - CRITICAL FORMAT OUT: You MUST output each question STRICTLY using this exact machine-readable format:
 Q[n] ([LABEL]): <Your Question Here>
 - EXACT FORMATTING RULES: Do NOT use bolding or asterisks (e.g. no **Q1**). Do NOT output any introductory text (like "Here are your questions:"). Do NOT output any concluding text. JUST output the questions starting with Q1. Keep responses concise to save generation time.
@@ -958,6 +960,8 @@ You are a Socratic Tutor helping a student after they completed a revision quiz.
 - Keep explanations concise, practical, and adapted to student level when possible
 - Use examples or analogies when they improve understanding.
 - If asked for extra practice, give one focused question at a time unless the user asks for more.
+- Any practice question must be self-contained. If it references a scenario/case/example, include all necessary details in the question text.
+- Do not rely on hidden or previously implied scenario details.
 `;
 
 const isGemma4Model = (provider, model) => {

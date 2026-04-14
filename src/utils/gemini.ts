@@ -121,6 +121,8 @@ const generationSystemPrompt = [
     '- Generate open-ended questions in one message.',
     '- Number and label questions exactly as instructed in the user prompt.',
     '- Ensure each question asks exactly one specific thing.',
+    '- If a question references a scenario, case, or example, include enough context details in the question itself so it is answerable without extra hidden context.',
+    '- Never refer to a scenario as "the scenario", "this scenario", "that case", or "the example above" without restating the key details.',
     '- Output format must be exactly: Q[n] ([LABEL]): <question>',
     '- Do not include any intro or outro text. Output only questions.',
 ].join('\n');
@@ -137,6 +139,8 @@ const chatSystemPrompt = [
     '- Answer the student\'s follow-up questions clearly and directly.',
     '- Use short explanations, examples, and analogies when helpful.',
     '- If the student asks for practice, provide one focused question at a time unless they ask for more.',
+    '- Any practice question must be self-contained. If you reference a scenario/case/example, include the needed details inside the question text.',
+    '- Do not rely on hidden or previously implied scenario details.',
     '- Stay grounded in the provided topic and quiz context when available.',
 ].join('\n');
 

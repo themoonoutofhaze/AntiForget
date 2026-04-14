@@ -38,6 +38,28 @@ const Q_LABEL_MAP: Record<number, string> = {
 
 const REVISION_LEARNED_SECTION_TITLE = 'Learned in Revision';
 const MAX_TOPIC_SUMMARY_LENGTH = 50000;
+const MAX_QUESTION_RETRY_ATTEMPTS = 2;
+const MAX_CHAT_PRACTICE_REWRITE_ATTEMPTS = 2;
+
+type ScenarioIssueReason = 'missing_scenario_context';
+
+interface ScenarioIssue {
+    questionIndex: number;
+    reason: ScenarioIssueReason;
+    snippet: string;
+}
+
+const PRACTICE_REQUEST_PATTERN = /\b(practice|quiz|test me|ask me|another question|one more question|give me a question)\b/i;
+const SCENARIO_REFERENCE_PATTERN = /\b(scenario|case|example)\b/i;
+const EXPLICIT_CONTEXT_HINT_PATTERN = /\b(where|when|given|with|in which|including|featuring|involving|that includes|that has)\b/i;
+const VAGUE_SCENARIO_PATTERNS = [
+    /\b(this|that|the)\s+scenario\b/i,
+    /\b(this|that|the)\s+case\b/i,
+    /\b(the\s+)?example\s+above\b/i,
+    /\bdescribed\s+above\b/i,
+    /\bmentioned\s+above\b/i,
+    /^\s*in\s+the\s+[^?]{1,160}\bscenario\b[,\s]/i,
+];
 
 const formatLearningBullet = (note: string) => {
     const timestamp = new Date().toLocaleString();
@@ -94,6 +116,84 @@ const parseQuestions = (text: string): QuizQuestion[] => {
         }
     }
     return results;
+};
+
+const serializeQuestionsForHistory = (questions: QuizQuestion[]): string => {
+    return questions
+        .slice()
+        .sort((a, b) => a.index - b.index)
+        .map((q) => `Q${q.index} (${q.label}): ${q.text}`)
+        .join('\n');
+};
+
+const detectScenarioContextGap = (questionText: string): ScenarioIssueReason | null => {
+    const text = (questionText || '').trim();
+    if (!text) {
+        return null;
+    }
+
+    for (const pattern of VAGUE_SCENARIO_PATTERNS) {
+        if (pattern.test(text)) {
+            return 'missing_scenario_context';
+        }
+    }
+
+    // Short scenario references often rely on hidden summary details.
+    if (SCENARIO_REFERENCE_PATTERN.test(text) && text.length < 180 && !EXPLICIT_CONTEXT_HINT_PATTERN.test(text)) {
+        return 'missing_scenario_context';
+    }
+
+    return null;
+};
+
+const validateAppliedQuestions = (questions: QuizQuestion[]): ScenarioIssue[] => {
+    const issues: ScenarioIssue[] = [];
+    for (const question of questions) {
+        const isApplied = question.index === 2 || /applied|practical/i.test(question.label);
+        if (!isApplied) {
+            continue;
+        }
+
+        const reason = detectScenarioContextGap(question.text);
+        if (reason) {
+            issues.push({
+                questionIndex: question.index,
+                reason,
+                snippet: question.text.slice(0, 220),
+            });
+        }
+    }
+    return issues;
+};
+
+const getFallbackAppliedQuestion = (topicName: string): string => {
+    return `Choose a realistic real-world situation where ${topicName} matters. What is one concrete first step you would take?`;
+};
+
+const extractQuestionCandidates = (text: string): string[] => {
+    const normalized = (text || '').replace(/\r/g, '\n').trim();
+    if (!normalized) {
+        return [];
+    }
+
+    const fromLines = normalized
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.includes('?'));
+    if (fromLines.length > 0) {
+        return fromLines;
+    }
+
+    const sentenceMatches = normalized.match(/[^?]+\?/g);
+    if (sentenceMatches && sentenceMatches.length > 0) {
+        return sentenceMatches.map((item) => item.trim());
+    }
+
+    return [normalized];
+};
+
+const hasVagueScenarioPracticeQuestion = (text: string): boolean => {
+    return extractQuestionCandidates(text).some((candidate) => detectScenarioContextGap(candidate) !== null);
 };
 
 const resolveValidDueQueue = (dueQueue: string[], validNodeIds: Set<string>): string[] => {
@@ -344,6 +444,7 @@ export const SocraticArena: React.FC = () => {
     const sendChatMessage = async () => {
         const trimmed = chatInput.trim();
         if (!trimmed || isChatSending) return;
+        const requestedPractice = PRACTICE_REQUEST_PATTERN.test(trimmed);
 
         setChatInput('');
         setChatError(null);
@@ -376,7 +477,37 @@ export const SocraticArena: React.FC = () => {
             if (resp.provider && resp.model) {
                 setActiveModelInfo({ provider: resp.provider, model: resp.model });
             }
-            setChatMessages((prev) => [...prev, { role: 'model', text: resp.text }]);
+
+            let finalChatText = resp.text;
+            if (requestedPractice && hasVagueScenarioPracticeQuestion(finalChatText)) {
+                for (let attempt = 1; attempt <= MAX_CHAT_PRACTICE_REWRITE_ATTEMPTS; attempt += 1) {
+                    console.warn(`[SocraticArena] Vague practice question detected. Rewriting attempt ${attempt}/${MAX_CHAT_PRACTICE_REWRITE_ATTEMPTS}.`);
+                    const rewritePrompt = [
+                        'Rewrite the practice question below so it is fully self-contained.',
+                        '- Keep exactly one question.',
+                        '- If a scenario/case/example is referenced, include all needed details inside the question text.',
+                        '- Do not use phrases like "this scenario", "that case", or "the example above".',
+                        '- If details are unavailable, rewrite as a self-contained practical question without relying on prior context.',
+                        '',
+                        `Original question: ${finalChatText}`,
+                    ].join('\n');
+
+                    const rewriteResp = await generateTutorResponse(history, rewritePrompt, topicContext, {
+                        signal: controller.signal,
+                        mode: 'chat',
+                    });
+                    if (rewriteResp.provider && rewriteResp.model) {
+                        setActiveModelInfo({ provider: rewriteResp.provider, model: rewriteResp.model });
+                    }
+
+                    finalChatText = rewriteResp.text.trim() || finalChatText;
+                    if (!hasVagueScenarioPracticeQuestion(finalChatText)) {
+                        break;
+                    }
+                }
+            }
+
+            setChatMessages((prev) => [...prev, { role: 'model', text: finalChatText }]);
         } catch (e: any) {
             if (e instanceof Error && e.name === 'AbortError') return;
             console.error(e);
@@ -609,22 +740,73 @@ export const SocraticArena: React.FC = () => {
         activeRequestRef.current = controller;
 
         try {
-            const resp = await generateTutorResponse(
-                [],
-                'Start the first round now. Follow all protocol constraints.',
-                topicContext,
-                { signal: controller.signal }
-            );
-            if (resp.provider && resp.model) {
-                setActiveModelInfo({ provider: resp.provider, model: resp.model });
-            }
-            setQuestionGenerationMs(typeof resp.generationMs === 'number' ? resp.generationMs : null);
-            await new Promise((resolve) => window.setTimeout(resolve, 450));
             const expectedQuestionCount = Math.max(1, Math.min(3, topicContext.questionCount || (lightning ? 1 : 3)));
-            const parsed = parseQuestions(resp.text)
-                .sort((a, b) => a.index - b.index)
-                .slice(0, expectedQuestionCount);
-            setRawAiQuestionMessage(resp.text);
+            const baseQuestionPrompt = 'Start the first round now. Follow all protocol constraints.';
+            let finalRawQuestionMessage = '';
+            let parsed: QuizQuestion[] = [];
+            let appliedIssues: ScenarioIssue[] = [];
+            let generationMs: number | null = null;
+
+            for (let attempt = 0; attempt <= MAX_QUESTION_RETRY_ATTEMPTS; attempt += 1) {
+                const retryInstruction = attempt === 0
+                    ? ''
+                    : [
+                        '',
+                        'Regeneration requirement:',
+                        '- The previous output contained an applied/practical question that relied on hidden scenario context.',
+                        '- Regenerate ALL questions.',
+                        '- Any scenario/case/example question must include all needed details in the question text itself.',
+                        '- If that is not possible, avoid scenario references and ask a self-contained practical question instead.',
+                    ].join('\n');
+                const prompt = `${baseQuestionPrompt}${retryInstruction}`;
+
+                const resp = await generateTutorResponse([], prompt, topicContext, { signal: controller.signal });
+                finalRawQuestionMessage = resp.text;
+                if (resp.provider && resp.model) {
+                    setActiveModelInfo({ provider: resp.provider, model: resp.model });
+                }
+                generationMs = typeof resp.generationMs === 'number' ? resp.generationMs : generationMs;
+
+                parsed = parseQuestions(resp.text)
+                    .sort((a, b) => a.index - b.index)
+                    .slice(0, expectedQuestionCount);
+                appliedIssues = validateAppliedQuestions(parsed);
+
+                const hasExpectedCount = parsed.length === expectedQuestionCount;
+                if (hasExpectedCount && appliedIssues.length === 0) {
+                    break;
+                }
+
+                console.warn(
+                    `[SocraticArena] Question regeneration required (attempt ${attempt + 1}/${MAX_QUESTION_RETRY_ATTEMPTS + 1}). `
+                    + `count=${parsed.length}/${expectedQuestionCount}, appliedIssues=${appliedIssues.length}`
+                );
+            }
+
+            if (parsed.length !== expectedQuestionCount) {
+                throw new Error('Could not generate a complete set of Socratic questions. Please try again.');
+            }
+
+            if (appliedIssues.length > 0) {
+                const issueIndexes = new Set(appliedIssues.map((issue) => issue.questionIndex));
+                parsed = parsed.map((question) => {
+                    if (!issueIndexes.has(question.index)) {
+                        return question;
+                    }
+                    return {
+                        ...question,
+                        text: getFallbackAppliedQuestion(topicContext.topicName),
+                    };
+                });
+                finalRawQuestionMessage = serializeQuestionsForHistory(parsed);
+                console.warn('[SocraticArena] Applied question fallback used after retries.', appliedIssues);
+            } else {
+                finalRawQuestionMessage = serializeQuestionsForHistory(parsed);
+            }
+
+            setQuestionGenerationMs(generationMs);
+            await new Promise((resolve) => window.setTimeout(resolve, 450));
+            setRawAiQuestionMessage(finalRawQuestionMessage);
             setQuestions(parsed);
             setAnswers(new Array(parsed.length).fill(''));
             setIsTimerActive(true);
