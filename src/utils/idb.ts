@@ -80,3 +80,35 @@ export const deletePdfBlob = async (id: string) => {
         throw new Error(text || 'Failed to delete file');
     }
 };
+
+export const getTopicFileLink = async (id: string) => {
+    const res = await fetch(`/api/app/files/${encodeURIComponent(id)}`);
+
+    if (res.status === 401) {
+        const hadSession = !!localStorage.getItem('synapse_auth_user');
+        localStorage.removeItem('synapse_auth_user');
+        localStorage.removeItem('synapse_auth_token');
+        if (hadSession) window.location.reload();
+        throw new Error('Session expired. Please sign in again.');
+    }
+
+    const text = await res.text();
+    if (!res.ok) {
+        try {
+            const parsed = JSON.parse(text);
+            throw new Error(parsed?.error || text || 'Failed to load file');
+        } catch {
+            throw new Error(text || 'Failed to load file');
+        }
+    }
+
+    const payload = text ? JSON.parse(text) : null;
+    return payload as null | {
+        ok: boolean;
+        provider: string;
+        driveFileLink: string | null;
+        originalName: string;
+        mimeType: string;
+        sizeBytes: number;
+    };
+};

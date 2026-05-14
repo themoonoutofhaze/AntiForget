@@ -3,6 +3,7 @@ import { Send, Target, KeyRound, CheckCircle2, ChevronRight, BookOpen, Star, Smi
 import { Timer } from '../ui/Timer';
 import { RichTextMessage } from '../ui/RichTextMessage';
 import { addRevisionSeconds, getTodaysReviews, processReview, computeQuestionCount } from '../../utils/fsrs';
+import { getTopicFileLink } from '../../utils/idb';
 import { getStorage, updateStorage, type AiProvider } from '../../utils/storage';
 import { calculateAverageScore, extractQuestionScores, generateTutorResponse, getApiCredentialStatus, getProviderLabel, getUserModels, saveApiCredential, type TutorTopicContext, type AiAttempt, type ModelProvider } from '../../utils/gemini';
 
@@ -298,6 +299,12 @@ export const SocraticArena: React.FC = () => {
     const [isSummaryAppendSaving, setIsSummaryAppendSaving] = useState(false);
     const [isSummaryDraftGenerating, setIsSummaryDraftGenerating] = useState(false);
     const [summaryAppendNotice, setSummaryAppendNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
+    const [reviewTopicSummary, setReviewTopicSummary] = useState<string | null>(null);
+    const [reviewTopicHasPdf, setReviewTopicHasPdf] = useState(false);
+    const [reviewTopicTitle, setReviewTopicTitle] = useState('');
+    const [isSummaryVisible, setIsSummaryVisible] = useState(false);
+    const [isFileLinkLoading, setIsFileLinkLoading] = useState(false);
+    const [fileLinkError, setFileLinkError] = useState<string | null>(null);
 
     /* Lobby swipe physics */
     const lobbyRef = useRef<HTMLDivElement>(null);
@@ -398,6 +405,34 @@ export const SocraticArena: React.FC = () => {
         };
         loadConfig();
     }, []);
+
+    useEffect(() => {
+        const loadReviewTopicDetails = async () => {
+            if (phase !== 'results' || !currentNodeId) {
+                setReviewTopicSummary(null);
+                setReviewTopicHasPdf(false);
+                setReviewTopicTitle('');
+                setIsSummaryVisible(false);
+                setFileLinkError(null);
+                return;
+            }
+
+            try {
+                const storage = await getStorage();
+                const node = storage.nodes.find((entry) => entry.id === currentNodeId);
+                setReviewTopicSummary(node?.summary || '');
+                setReviewTopicHasPdf(Boolean(node?.hasPdfBlob));
+                setReviewTopicTitle(node?.title || currentTopicName || '');
+            } catch (error) {
+                console.error('Failed to load topic summary:', error);
+                setReviewTopicSummary('');
+                setReviewTopicHasPdf(false);
+                setReviewTopicTitle(currentTopicName || '');
+            }
+        };
+
+        loadReviewTopicDetails();
+    }, [phase, currentNodeId, currentTopicName]);
 
     useEffect(() => {
         return () => { activeRequestRef.current?.abort(); };
@@ -976,6 +1011,12 @@ export const SocraticArena: React.FC = () => {
         setIsSummaryAppendSaving(false);
         setIsSummaryDraftGenerating(false);
         setSummaryAppendNotice(null);
+        setReviewTopicSummary(null);
+        setReviewTopicHasPdf(false);
+        setReviewTopicTitle('');
+        setIsSummaryVisible(false);
+        setIsFileLinkLoading(false);
+        setFileLinkError(null);
         setIsStarting(false);
         setStartingMode(null);
         setIsExitingQuiz(false);
@@ -989,6 +1030,25 @@ export const SocraticArena: React.FC = () => {
             await resetToLobby();
         } finally {
             setIsExitingQuiz(false);
+        }
+    };
+
+    const handleOpenTopicFile = async () => {
+        if (!currentNodeId || isFileLinkLoading) return;
+        setFileLinkError(null);
+        setIsFileLinkLoading(true);
+        try {
+            const payload = await getTopicFileLink(currentNodeId);
+            if (!payload?.driveFileLink) {
+                setFileLinkError('No file link is available for this topic.');
+                return;
+            }
+            window.open(payload.driveFileLink, '_blank', 'noopener,noreferrer');
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to open the file.';
+            setFileLinkError(message);
+        } finally {
+            setIsFileLinkLoading(false);
         }
     };
 
@@ -1420,6 +1480,8 @@ export const SocraticArena: React.FC = () => {
                     : "Keep going — every attempt builds your knowledge. Check the correct answers below.")
             : 'Review complete.';
 
+        const hasSummary = Boolean(reviewTopicSummary && reviewTopicSummary.trim().length > 0);
+
         return (
             <div className="animate-slide-up w-full space-y-6 pb-8">
                 {/* Result banner */}
@@ -1436,6 +1498,52 @@ export const SocraticArena: React.FC = () => {
                                 <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
                                     via {getProviderLabel(activeModelInfo.provider)}
                                 </span>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                <div className="glass-card max-w-4xl mx-auto p-5 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div>
+                            <h3 className="section-title text-lg">Review summary</h3>
+                            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                                {reviewTopicTitle ? `Revisit notes for ${reviewTopicTitle}.` : 'Revisit the topic summary after your review.'}
+                            </p>
+                        </div>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                            <button
+                                id="toggle-topic-summary-btn"
+                                onClick={() => setIsSummaryVisible((prev) => !prev)}
+                                className="btn-secondary text-sm"
+                            >
+                                {isSummaryVisible ? 'Hide Summary' : 'Show Summary'}
+                            </button>
+                            {reviewTopicHasPdf && (
+                                <button
+                                    id="open-topic-pdf-btn"
+                                    onClick={handleOpenTopicFile}
+                                    className="btn-primary text-sm"
+                                    disabled={isFileLinkLoading}
+                                >
+                                    {isFileLinkLoading ? 'Opening...' : 'Open Summary PDF'}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {fileLinkError && (
+                        <p className="text-xs" style={{ color: '#ef4444' }}>{fileLinkError}</p>
+                    )}
+
+                    {isSummaryVisible && (
+                        <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-default)' }}>
+                            {hasSummary ? (
+                                <RichTextMessage text={reviewTopicSummary || ''} />
+                            ) : (
+                                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                                    No summary is saved for this topic yet.
+                                </p>
                             )}
                         </div>
                     )}

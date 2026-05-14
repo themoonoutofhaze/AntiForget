@@ -2614,6 +2614,57 @@ app.post('/api/app/files/upload', upload.single('file'), async (req, res) => {
   }
 });
 
+app.get('/api/app/files/:topicId', async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const topicId = req.params.topicId;
+    if (!userId || !topicId) {
+      return res.status(400).json({ error: 'userId and topicId are required' });
+    }
+
+    await ensureUser(userId);
+    const db = await getDb();
+    const asset = await db.get(
+      `SELECT provider, drive_file_id, original_name, mime_type, size_bytes
+         FROM file_assets
+        WHERE user_id = ? AND topic_id = ?`,
+      [userId, topicId]
+    );
+
+    if (!asset?.drive_file_id) {
+      return res.status(404).json({ error: 'No file is attached to this topic.' });
+    }
+
+    if (!hasGoogleDriveConfig()) {
+      return res.status(400).json({ error: 'Google Drive is not configured on server.' });
+    }
+
+    const drive = await getDriveClientForUser(userId);
+    const fileMeta = await drive.files.get({
+      fileId: asset.drive_file_id,
+      fields: 'id, name, mimeType, size, webViewLink',
+    });
+    const driveFileLink = fileMeta?.data?.webViewLink || null;
+
+    if (!driveFileLink) {
+      return res.status(404).json({ error: 'No web link is available for this file.' });
+    }
+
+    return res.json({
+      ok: true,
+      provider: asset.provider || 'google-drive',
+      driveFileLink,
+      originalName: asset.original_name || fileMeta?.data?.name || 'attachment',
+      mimeType: asset.mime_type || fileMeta?.data?.mimeType || 'application/octet-stream',
+      sizeBytes: Number(fileMeta?.data?.size || asset.size_bytes || 0),
+    });
+  } catch (error) {
+    console.error(error);
+    const message = error instanceof Error ? error.message : 'Failed to load file details';
+    return res.status(500).json({ error: message });
+  }
+});
+
 app.delete('/api/app/files/:topicId', async (req, res) => {
   try {
     const userId = getUserId(req);
